@@ -1,6 +1,5 @@
 use serde::Deserialize;
 
-
 pub enum DeltaSubscriptionType {
     Orderbook,
     Subscription,
