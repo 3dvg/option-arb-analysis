@@ -1,4 +1,5 @@
 mod exchanges;
+mod model;
 
 use std::collections::HashSet;
 use std::slice::Chunks;
@@ -6,29 +7,40 @@ use std::time::Duration;
 use std::{collections::HashMap, time::Instant};
 
 use crate::exchanges::delta::model::{DeltaHeartbeat, DeltaOrderbook, DeltaProductWrapper};
+use crate::exchanges::deribit::model::{DeribitOrderbookData, DeribitOrderbookDataWrapper};
 use anyhow::Error;
+use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use exchanges::delta::model::DeltaProduct;
+use exchanges::delta::model::{DeltaProduct, DeltaClient};
 use exchanges::delta::*;
 use exchanges::deribit::model::DeribitInstrumentsWrapper;
 use futures::{SinkExt, StreamExt};
 use log::*;
-use log::*;
+use model::{Event, Exchange, OrbitData};
+use serde::Deserialize;
+use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
+use tokio::sync::broadcast;
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
 
-pub enum Exchange {
-    Deribit,
-    Delta,
+#[async_trait]
+pub trait ExchangeAPI {
+    const URL: &'static str;
+    async fn get_products<T>() -> Result<T, Error>
+    where
+        T: DeserializeOwned;
+    async fn consume(&self);
 }
 
 pub async fn get_delta_products() -> Result<DeltaProductWrapper, Error> {
-    let url = "https://api.delta.exchange/v2/products"; //TODO!
-    let response = reqwest::get(url).await?;
-    let resp_text = response.text().await?;
-    let resp_json =
-        serde_json::from_str::<DeltaProductWrapper>(&resp_text).expect("Error parsing Delta");
-    Ok(resp_json)
+    // let url = "https://api.delta.exchange/v2/products"; //TODO!
+    // let response = reqwest::get(url).await?;
+    // let resp_text = response.text().await?;
+    // let resp_json =
+    //     serde_json::from_str::<DeltaProductWrapper>(&resp_text).expect("Error parsing Delta");
+    // Ok(resp_json)
+    let resp_json =DeltaClient::get_products().await?;
+    Ok((resp_json))
 }
 
 pub async fn consume_delta(delta_products: DeltaProductWrapper) -> Result<(), Error> {
@@ -204,37 +216,37 @@ pub async fn consume_deribit(deribit_products: DeribitInstrumentsWrapper) {
                         let resp = serde_json::from_str::<HashMap<String, Value>>(&text)
                             .expect("Error parsing Deribit");
                         match resp.get("method") {
-                            Some(method) => {
-                                match method {
-                                    Value::String(method) => match method.as_str() {
-                                        "subscription" => {
-                                            // debug!("received subscription msg");
+                            Some(method) => match method {
+                                Value::String(method) => match method.as_str() {
+                                    "subscription" => {
+                                        let data: DeribitOrderbookDataWrapper =
+                                            serde_json::from_str(&text).expect("Can't parse");
+                                        debug!("-- {:?}", data);
+                                    }
+                                    "heartbeat" => {
+                                        if hearbeat_timer.elapsed().as_secs() > 35 {
+                                            warn!("connection died, reconnecting...");
+                                            break;
                                         }
-                                        "heartbeat" => {
-                                            if hearbeat_timer.elapsed().as_secs() > 35 {
-                                                warn!("connection died, reconnecting...");
-                                                break;
-                                            }
-                                            hearbeat_timer = Instant::now();
-                                            debug!("received heatbeat pong {:?}", text);
-                                            let result = stream
-                                                .send(Message::Text(
-                                                    json!({
-                                                        "jsonrpc" : "2.0",
-                                                        "id" : 8212,
-                                                        "method" : "public/test",
-                                                        "params" : {}
-                                                    })
-                                                    .to_string(),
-                                                ))
-                                                .await;
-                                            debug!("sent heatbeat ping {:?}", result);
-                                        }
-                                        _ => {}
-                                    },
+                                        hearbeat_timer = Instant::now();
+                                        debug!("received heatbeat pong {:?}", text);
+                                        let result = stream
+                                            .send(Message::Text(
+                                                json!({
+                                                    "jsonrpc" : "2.0",
+                                                    "id" : 8212,
+                                                    "method" : "public/test",
+                                                    "params" : {}
+                                                })
+                                                .to_string(),
+                                            ))
+                                            .await;
+                                        debug!("sent heatbeat ping {:?}", result);
+                                    }
                                     _ => {}
-                                }
-                            }
+                                },
+                                _ => {}
+                            },
                             None => {}
                         }
                     }

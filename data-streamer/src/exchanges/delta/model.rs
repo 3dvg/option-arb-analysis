@@ -1,4 +1,28 @@
-use serde::Deserialize;
+use crate::ExchangeAPI;
+use anyhow::Error;
+use async_trait::async_trait;
+use log::debug;
+use serde::{Deserialize, de::DeserializeOwned};
+
+pub struct DeltaClient;
+
+#[async_trait]
+impl ExchangeAPI for DeltaClient {
+    const URL: &'static str = "";
+    async fn get_products<DeltaProductWrapper>() -> Result<DeltaProductWrapper, Error>
+    where
+        DeltaProductWrapper: DeserializeOwned,
+    {
+        let url = "https://api.delta.exchange/v2/products"; //TODO!
+        let response = reqwest::get(url).await?;
+        let resp_text = response.text().await?;
+        let resp_json = 
+            serde_json::from_str::<DeltaProductWrapper>(&resp_text).expect("Error parsing Delta");
+        Ok(resp_json)
+    }
+
+    async fn consume(&self) {}
+}
 
 pub enum DeltaSubscriptionType {
     Orderbook,

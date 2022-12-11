@@ -1,11 +1,53 @@
+use std::collections::{BTreeMap, HashMap};
+use tokio::sync::broadcast::{self, Receiver, Sender};
 
-pub struct Storage {
-    pub exchange: HashMap<Exchange, StorageInstruments>
+#[derive(Debug)]
+pub struct OrbitData {
+    pub subscriptions: Vec<Exchange>,
+    pub sender: Sender<Event>,
+    pub receiver: Receiver<Event>,
 }
 
+impl OrbitData {
+    pub fn new(subscriptions: Vec<Exchange>) -> Self {
+        let (sender, receiver) = broadcast::channel::<Event>(256); //todo 256? check channel congestion
+        Self {
+            subscriptions,
+            sender,
+            receiver,
+        }
+    }
+
+    pub fn get_all_instruments() {
+        todo!()
+    }
+
+    pub fn get_common_instruments() {
+        todo!()
+    }
+
+    pub fn consume_all_instruments() {
+        todo!()
+    }
+
+    pub fn consume_instruments(symbols: Vec<String>) {
+        todo!()
+    }
+}
+
+#[derive(Clone)]
+pub enum Event {
+    Orderbook,
+}
+
+pub struct Storage {
+    pub exchange: HashMap<Exchange, StorageInstruments>,
+}
+
+#[derive(Debug)]
 pub enum Exchange {
-    Delta, 
-    Deribit
+    Deribit,
+    Delta,
 }
 
 pub type StorageInstruments = HashMap<InstrumentType, StorageData>;
@@ -22,10 +64,12 @@ pub enum StorageData {
     PerpetualsData,
 }
 // todo instrument -> optionchains
-
+pub type Symbol = String;
+pub type Expiration = u64;
+pub type Strike = u64;
 pub type OptionInstrument = HashMap<Symbol, OptionChains>;
-pub type OptionChains = BtreeMap<Expiration, OptionChain>;
-pub type OptionChain = BtreeMap<Strike, OptionChainLevel>;
+pub type OptionChains = BTreeMap<Expiration, OptionChain>;
+pub type OptionChain = BTreeMap<Strike, OptionChainLevel>;
 pub struct OptionChainLevel {
     pub puts: Vec<OptionChainLevelOrderbook>,
     pub calls: Vec<OptionChainLevelOrderbook>,

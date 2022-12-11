@@ -4,11 +4,11 @@ use serde::Deserialize;
 pub struct DeribitInstrumentsWrapper {
     pub id: Option<u64>,
     // pub jsonrpc: String,
-    pub result: Vec<GetInstrumentsResponse>,
+    pub result: Vec<DeribitInstruments>,
 }
 
 #[derive(Deserialize, Debug)]
-pub struct GetInstrumentsResponse {
+pub struct DeribitInstruments {
     pub base_currency: String,
     // pub block_trade_commission: f64,
     // pub contract_size: u64,
@@ -30,4 +30,45 @@ pub struct GetInstrumentsResponse {
     pub strike: Option<f64>,
     // pub taker_commision: f64,
     // pub tick_size: f64,
+}
+
+#[derive(Deserialize, Debug, Clone, Copy)]
+#[serde(rename_all = "lowercase")]
+pub enum DeribitOrderbookAction {
+    New,
+    Change,
+    Delete,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct DeribitOrderbookUpdate(pub DeribitOrderbookAction, pub f64, pub f64);
+
+#[derive(Deserialize, Debug, Clone)]
+#[serde(rename_all = "lowercase")]
+pub enum DeribitOrderbookUpdateType {
+    Change,
+    Snapshot,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct DeribitOrderbookDataWrapper {
+    pub method: String,
+    pub params: DeribitOrderbookDataParams,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct DeribitOrderbookDataParams {
+    pub channel: String,
+    pub data: DeribitOrderbookData,
+}
+#[derive(Deserialize, Debug, Clone)]
+pub struct DeribitOrderbookData {
+    pub asks: Vec<DeribitOrderbookUpdate>,
+    pub bids: Vec<DeribitOrderbookUpdate>,
+    pub change_id: i64,
+    pub instrument_name: String,
+    pub prev_change_id: Option<i64>,
+    pub timestamp: u64,
+    #[serde(rename = "type")]
+    pub kind: DeribitOrderbookUpdateType,
 }
