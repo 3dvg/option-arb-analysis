@@ -1,0 +1,6 @@
+[workspace]
+
+members = [
+    "data-streamer",
+    "option-arb-analyzer",
+]
