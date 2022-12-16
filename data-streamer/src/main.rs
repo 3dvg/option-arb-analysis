@@ -6,6 +6,7 @@ use anyhow::{Error, Result};
 //     stream_websockets_delta, exchanges
 // };
 
+use chrono::{DateTime, NaiveDateTime, Utc, NaiveTime};
 use data_streamer::{OrbitData, OrbitExchange};
 // use exchanges::delta::model::*;
 // use exchanges::deribit::model::*;
@@ -46,8 +47,35 @@ async fn main() -> Result<(), Error> {
     let orbit = OrbitData::new(exchanges);
     debug!("orbit {:?}", orbit);
 
-    let products = orbit.get_all_instruments().await?;
-    debug!("products {:?}", products);
+    // let products = orbit.get_all_instruments().await?;
+    // debug!("products {:?}", products.len());
 
+    // let products = orbit.get_common_instruments().await?;
+    // debug!("common products {:?}", products.len());
+    
+    let d = DateTime::parse_from_rfc3339("2023-01-06T12:00:00Z").unwrap().timestamp_millis();
+    debug!("d {d}");
+    
+
+
+    let d: DateTime<Utc> = DateTime::from_utc(NaiveDateTime::from_timestamp_millis(d).unwrap(), Utc);
+    debug!("d {d}");
+    
+    let d = d.date_naive();
+    debug!("d {d}");
+
+
+    let d = DateTime::parse_from_rfc3339("2023-01-06T12:00:00Z").unwrap().date_naive();
+    debug!("d {d}");
+    
+    let t = NaiveTime::from_hms_opt(0, 0, 0).unwrap();
+    let a = NaiveDateTime::new(d, t);
+    let d: DateTime<Utc> = DateTime::from_local(a, Utc);
+    debug!("d {d}");
+    
+    let d = d.timestamp_millis();
+    debug!("d {d}");
+    let d: DateTime<Utc> = DateTime::from_utc(NaiveDateTime::from_timestamp_millis(d).unwrap(), Utc);
+    debug!("d {d}");
     Ok(())
 }

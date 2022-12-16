@@ -4,10 +4,11 @@ use std::{
 };
 
 use crate::{
-    OrbitEvent, OrbitEventPayload, OrbitInstrument, OrderbookUpdate, OrderbookUpdateLevel,
-    OrderbookUpdateType,
+    OrbitContractType, OrbitEvent, OrbitEventPayload, OrbitInstrument, OrderbookUpdate,
+    OrderbookUpdateLevel, OrderbookUpdateType, OrbitExchange,
 };
 use anyhow::Error;
+use chrono::{DateTime, NaiveDateTime, NaiveTime, Utc};
 use futures::{SinkExt, StreamExt};
 use log::*;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -201,14 +202,31 @@ pub struct DeltaProduct {
     pub symbol: String,
     #[serde(rename = "strike_price")]
     pub strike: Option<String>,
-    pub contract_type: String,
+    pub contract_type: DeltaContractType,
     pub settlement_time: Option<String>,
     pub launch_time: Option<String>,
     pub underlying_asset: DeltaProductUnderlyingAsset,
+    pub quoting_asset: DeltaProductQuotingAsset,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DeltaContractType {
+    Futures,
+    PerpetualFutures,
+    CallOptions,
+    PutOptions,
+    MoveOptions,
+    Spot,
 }
 
 #[derive(Deserialize, Debug)]
 pub struct DeltaProductUnderlyingAsset {
+    pub symbol: String,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct DeltaProductQuotingAsset {
     pub symbol: String,
 }
 
@@ -280,8 +298,51 @@ impl From<DeltaOrderbook> for OrderbookUpdate {
 
 impl From<&DeltaProduct> for OrbitInstrument {
     fn from(delta_product: &DeltaProduct) -> Self {
+        let expiration_datetime = match delta_product.settlement_time.clone() {
+            Some(time) => Some(
+                DateTime::parse_from_rfc3339(time.as_str())
+                    .unwrap()
+                    .timestamp_millis(),
+            ),
+            None => None,
+        };
+
+        let expiration_date = match delta_product.settlement_time.clone() {
+                Some(time) => {
+                    let nd = DateTime::parse_from_rfc3339(&time).unwrap().date_naive();
+                    let t = NaiveTime::from_hms_opt(0, 0, 0).unwrap();
+                    let a = NaiveDateTime::new(nd, t);
+                    let d: DateTime<Utc> = DateTime::from_local(a, Utc);
+                    let d = d.timestamp_millis();
+                    Some(d)
+                },
+                None => None,
+            };
+        
+        let strike = match delta_product.strike.clone() {
+            Some(strike) => Some(strike.parse::<u64>().unwrap()),
+            None => None,
+        };
+
+        let contract_type = match delta_product.contract_type {
+            DeltaContractType::Futures => OrbitContractType::Future,
+            DeltaContractType::PerpetualFutures => OrbitContractType::PerpetualFuture,
+            DeltaContractType::CallOptions => OrbitContractType::CallOption,
+            DeltaContractType::PutOptions => OrbitContractType::PutOption,
+            DeltaContractType::MoveOptions => OrbitContractType::MoveOption,
+            DeltaContractType::Spot => OrbitContractType::Spot,
+        };
+
+        // debug!("delta timestamp transformed {:?}, settlement_time {:?}", expiration, delta_product.settlement_time);
         Self {
             symbol: delta_product.symbol.clone(),
+            base: delta_product.underlying_asset.symbol.clone(),
+            quote: delta_product.quoting_asset.symbol.clone(),
+            strike,
+            expiration_datetime,
+            expiration_date,
+            contract_type,
+            exchange: OrbitExchange::Delta,
         }
     }
 }

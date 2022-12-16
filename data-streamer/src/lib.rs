@@ -1,7 +1,10 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::hash::Hash;
+use std::mem::swap;
 
 use anyhow::Error;
 use log::debug;
+use serde::__private::de;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 
 mod exchanges;
@@ -59,7 +62,11 @@ impl OrbitData {
                         .iter()
                         .map(|product| OrbitInstrument::from(product))
                         .collect();
-                    debug!("received {:?} instruments from {:?}", orbit_data.len(), exchange);
+                    debug!(
+                        "received {:?} instruments from {:?}",
+                        orbit_data.len(),
+                        exchange
+                    );
                     instruments.insert(exchange, orbit_data);
                 }
                 OrbitExchangeClient::Deribit(client) => {
@@ -69,7 +76,11 @@ impl OrbitData {
                         .iter()
                         .map(|product| OrbitInstrument::from(product))
                         .collect();
-                    debug!("received {:?} instruments from {:?}", orbit_data.len(), exchange);
+                    debug!(
+                        "received {:?} instruments from {:?}",
+                        orbit_data.len(),
+                        exchange
+                    );
                     instruments.insert(exchange, orbit_data);
                 }
             }
@@ -77,9 +88,66 @@ impl OrbitData {
         Ok(instruments)
     }
 
-    pub fn get_common_instruments() {
-        todo!()
+    pub async fn get_common_instruments(&self) -> Result<Vec<String>, Error> {
+        let instruments_map: HashMap<&OrbitExchange, Vec<OrbitInstrument>> =
+            self.get_all_instruments().await?;
+        // let codes_map: HashMap<OrbitExchange, Vec<String>>
+        let mut map: HashMap<String, &OrbitInstrument> = HashMap::new();
+        let mut result = vec![];
+        let mut debugging = vec![];
+        for (i, (exchange, instruments)) in instruments_map.iter().enumerate() {
+            if i == 0 {
+                let orbit_codes =
+                    instruments
+                        .iter()
+                        .fold(HashMap::new(), |mut orbit_codes, instrument| {
+                            orbit_codes.insert(instrument.get_cmp_code(), instrument);
+                            orbit_codes
+                        });
+                map = orbit_codes;
+
+                let dev =
+                    instruments
+                        .iter()
+                        .fold(Vec::new(), |mut orbit_codes, instrument| {
+                            orbit_codes.push(instrument.get_cmp_code());
+                            orbit_codes
+                        });
+                debugging.push(dev);
+                continue;
+            }
+            debug!("2nd round {:?}", exchange);
+            let dev =
+            instruments
+                .iter()
+                .fold(Vec::new(), |mut orbit_codes, instrument| {
+                    orbit_codes.push(instrument.get_cmp_code());
+                    orbit_codes
+                });
+        debugging.push(dev);
+        }
+
+        // debug!("debugging {:?}", debugging);
+        debugging[0].sort(); 
+        debugging[1].sort();
+
+        for (i, j) in debugging[0].iter().zip(debugging[1].iter()) {
+            debug!("{i}||{j}");
+        }
+        Ok(result)
     }
+
+    // fn _find_common_elements(
+    //     list1: Vec<OrbitInstrument>,
+    //     list2: Vec<OrbitInstrument>,
+    // ) -> Result<Vec<OrbitInstrument>, Error> {
+    //     if list1.len() > list2.len() {
+    //         swap(&mut list1, &mut list2)
+    //     }
+    //     list1.iter().fold(Vec<OrbitInstrument>::new(), );
+
+    //     Ok(list1)
+    // }
 
     pub fn consume_all_instruments() {
         todo!()
@@ -90,9 +158,48 @@ impl OrbitData {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq, Hash)]
 pub struct OrbitInstrument {
     symbol: String,
+    base: String,
+    quote: String,
+    strike: Option<u64>,
+    expiration_datetime: Option<i64>, // datetime?
+    expiration_date: Option<i64>, // datetime?
+    contract_type: OrbitContractType,
+    exchange: OrbitExchange,
+}
+
+impl OrbitInstrument {
+    pub fn get_cmp_code(&self) -> String {
+        format!(
+            "{:?}.{}.{:?}.{:?}.",
+            self.contract_type, self.base, self.expiration_date, self.strike
+        )
+    }
+}
+// this was built do do the common instrument algo, may not use it leaving it here in case i come back
+// impl PartialEq for OrbitInstrument {
+//     fn eq(&self, other: &Self) -> bool {
+//         self.base == other.base
+//             && self.quote == other.quote
+//             && self.strike == other.strike
+//             && self.expiration == other.expiration
+//             && self.contract_type == other.contract_type
+//     }
+// }
+
+#[derive(Debug, PartialEq, Eq, Hash)]
+pub enum OrbitContractType {
+    Spot,
+    Future,
+    PerpetualFuture,
+    CallOption,
+    PutOption,
+    MoveOption,
+    FutureCombo,
+    OptionCombo,
+    Unimplemented,
 }
 
 #[derive(Debug)]
