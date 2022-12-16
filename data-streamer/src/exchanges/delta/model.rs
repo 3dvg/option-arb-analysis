@@ -300,22 +300,18 @@ impl From<&DeltaProduct> for OrbitInstrument {
                 .timestamp_millis()
         });
 
-        let expiration_date = match delta_product.settlement_time.clone() {
-            Some(time) => {
-                let nd = DateTime::parse_from_rfc3339(&time).unwrap().date_naive();
-                let t = NaiveTime::from_hms_opt(0, 0, 0).unwrap();
-                let a = NaiveDateTime::new(nd, t);
-                let d: DateTime<Utc> = DateTime::from_local(a, Utc);
-                let d = d.timestamp_millis();
-                Some(d)
-            }
-            None => None,
-        };
+        let expiration_date = delta_product.settlement_time.clone().map(|time| {
+            let nd = DateTime::parse_from_rfc3339(&time).unwrap().date_naive();
+            let t = NaiveTime::from_hms_opt(0, 0, 0).unwrap();
+            let a = NaiveDateTime::new(nd, t);
+            let d: DateTime<Utc> = DateTime::from_local(a, Utc);
+            d.timestamp_millis()
+        });
 
-        let strike = match delta_product.strike.clone() {
-            Some(strike) => Some(strike.parse::<u64>().unwrap()),
-            None => None,
-        };
+        let strike = delta_product
+            .strike
+            .clone()
+            .map(|strike| strike.parse::<u64>().unwrap());
 
         let contract_type = match delta_product.contract_type {
             DeltaContractType::Futures => OrbitContractType::Future,
