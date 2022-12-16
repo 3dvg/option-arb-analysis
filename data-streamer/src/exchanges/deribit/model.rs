@@ -50,7 +50,7 @@ impl DeribitClient {
             let url = format!(
                 "https://deribit.com/api/v2/public/get_instruments?currency={}&expired=false",
                 c.currency
-            ); //TODO!
+            );
             let response = reqwest::get(url).await?;
             let resp_text = response.text().await?;
             let resp_json = serde_json::from_str::<DeribitInstrumentsWrapper>(&resp_text)
@@ -77,12 +77,10 @@ impl DeribitClient {
     ) {
         let mut deribit_symbols = vec![];
         for product in deribit_products.result.iter() {
-            let kind = match product.kind {
-                DeribitInstrumentKind::Future => "future",
-                DeribitInstrumentKind::Option => "option",
-                _ => continue,
-            };
-            deribit_symbols.push(format!("book.{}.100ms", kind));
+            if product.kind == DeribitInstrumentKind::Future || product.kind == DeribitInstrumentKind::Option {
+                deribit_symbols.push(format!("book.{}.100ms", product.instrument_name));
+                //raw or 100ms
+            }
         }
         let mut sleep = 100; //ms
         loop {
