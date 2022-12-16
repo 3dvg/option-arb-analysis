@@ -1,12 +1,9 @@
-use std::borrow::Borrow;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::hash::Hash;
-use std::mem::swap;
 
 use anyhow::Error;
 use chrono::{DateTime, NaiveDateTime, Utc};
 use log::debug;
-use serde::__private::de;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 
 mod exchanges;
@@ -27,7 +24,7 @@ impl OrbitData {
         let mut clients: HashMap<OrbitExchange, OrbitExchangeClient> =
             HashMap::with_capacity(exchanges.capacity());
 
-        let _ = exchanges.iter().for_each(|exchange| match exchange {
+        exchanges.iter().for_each(|exchange| match exchange {
             OrbitExchange::Delta => {
                 clients.insert(
                     OrbitExchange::Delta,
@@ -59,11 +56,8 @@ impl OrbitData {
             match client {
                 OrbitExchangeClient::Delta(client) => {
                     let data = client.get_products().await?;
-                    let orbit_data: Vec<OrbitInstrument> = data
-                        .result
-                        .iter()
-                        .map(|product| OrbitInstrument::from(product))
-                        .collect();
+                    let orbit_data: Vec<OrbitInstrument> =
+                        data.result.iter().map(OrbitInstrument::from).collect();
                     debug!(
                         "received {:?} instruments from {:?}",
                         orbit_data.len(),
@@ -75,11 +69,8 @@ impl OrbitData {
                     let data = client.get_instruments().await?;
                     let mut norm_deribit_instruments = vec![];
                     data.iter().for_each(|currency| {
-                        let orbit_data: Vec<OrbitInstrument> = currency
-                            .result
-                            .iter()
-                            .map(|product| OrbitInstrument::from(product))
-                            .collect();
+                        let orbit_data: Vec<OrbitInstrument> =
+                            currency.result.iter().map(OrbitInstrument::from).collect();
                         norm_deribit_instruments.push(orbit_data);
                     });
                     let flattened_norm_data: Vec<OrbitInstrument> =
@@ -99,42 +90,27 @@ impl OrbitData {
     pub async fn get_common_instruments(&self) -> Result<Vec<OrbitInstrument>, Error> {
         let instruments_map: HashMap<&OrbitExchange, Vec<OrbitInstrument>> =
             self.get_all_instruments().await?;
-        // let codes_map: HashMap<OrbitExchange, Vec<String>>
-        // let mut map: HashMap<String, &OrbitInstrument> = HashMap::new();
-        let mut set: HashSet<String> = HashSet::new();
-        let mut result: HashSet<String> = HashSet::new();
-        // let mut not_common = vec![];
         let mut map: HashMap<String, Vec<OrbitInstrument>> = HashMap::new();
-        // let mut debugging = vec![];
-        for (i, (exchange, instruments)) in instruments_map.iter().enumerate() {
+        for (_exchange, instruments) in instruments_map.iter() {
             instruments.iter().for_each(|x| {
                 map.entry(x.get_cmp_code())
                     .and_modify(|list| list.push(x.clone()))
-                    .or_insert(vec![x.clone()]);
+                    .or_insert_with(|| vec![x.clone()]);
             });
         }
         map.retain(|_k, v| v.len() == instruments_map.len());
-        let result = map.into_values().flatten().collect::<Vec<OrbitInstrument>>();
+        let result = map
+            .into_values()
+            .flatten()
+            .collect::<Vec<OrbitInstrument>>();
         Ok(result)
     }
-
-    // fn _find_common_elements(
-    //     list1: Vec<OrbitInstrument>,
-    //     list2: Vec<OrbitInstrument>,
-    // ) -> Result<Vec<OrbitInstrument>, Error> {
-    //     if list1.len() > list2.len() {
-    //         swap(&mut list1, &mut list2)
-    //     }
-    //     list1.iter().fold(Vec<OrbitInstrument>::new(), );
-
-    //     Ok(list1)
-    // }
 
     pub fn consume_all_instruments() {
         todo!()
     }
 
-    pub fn consume_instruments(symbols: Vec<String>) {
+    pub fn consume_instruments(symbols: Vec<OrbitInstrument>) {
         todo!()
     }
 }

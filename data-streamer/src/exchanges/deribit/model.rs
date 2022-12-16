@@ -1,6 +1,6 @@
 use std::{
     collections::HashMap,
-    time::{Duration, Instant, UNIX_EPOCH},
+    time::{Duration, Instant},
 };
 
 use crate::{
@@ -129,60 +129,63 @@ impl DeribitClient {
             let mut hearbeat_timer: Instant = Instant::now();
             while let Some(event) = stream.next().await {
                 match event {
-                    Ok(msg) => match msg {
-                        Message::Text(text) => {
+                    Ok(msg) => {
+                        if let Message::Text(text) = msg {
                             let resp = serde_json::from_str::<HashMap<String, Value>>(&text)
                                 .expect("Error parsing Deribit");
                             match resp.get("method") {
-                                Some(method) => match method {
-                                    Value::String(method) => match method.as_str() {
-                                        "subscription" => {
-                                            let ob: DeribitOrderbookDataWrapper =
-                                                serde_json::from_str(&text).expect("Can't parse");
-                                            let norm_ob: OrbitEventPayload =
-                                                OrbitEventPayload::OrderbookUpdate(
-                                                    OrderbookUpdate::from(ob.params.data.clone()),
+                                Some(method) => {
+                                    if let Value::String(method) = method {
+                                        match method.as_str() {
+                                            "subscription" => {
+                                                let ob: DeribitOrderbookDataWrapper =
+                                                    serde_json::from_str(&text)
+                                                        .expect("Can't parse");
+                                                let norm_ob: OrbitEventPayload =
+                                                    OrbitEventPayload::OrderbookUpdate(
+                                                        OrderbookUpdate::from(
+                                                            ob.params.data.clone(),
+                                                        ),
+                                                    );
+                                                let orbit_event = OrbitEvent::new(
+                                                    "deribit".to_string(),
+                                                    ob.params.data.instrument_name,
+                                                    "futures or options".to_string(),
+                                                    norm_ob,
                                                 );
-                                            let orbit_event = OrbitEvent::new(
-                                                "deribit".to_string(),
-                                                ob.params.data.instrument_name,
-                                                "futures or options".to_string(),
-                                                norm_ob,
-                                            );
-                                            // debug!("-- {:?}", ob);
-                                            let _ = sender
-                                                .send(orbit_event)
-                                                .map_err(|err| error!("Error: {}", err));
-                                        }
-                                        "heartbeat" => {
-                                            if hearbeat_timer.elapsed().as_secs() > 35 {
-                                                warn!("connection died, reconnecting...");
-                                                break;
+                                                // debug!("-- {:?}", ob);
+                                                let _ = sender
+                                                    .send(orbit_event)
+                                                    .map_err(|err| error!("Error: {}", err));
                                             }
-                                            hearbeat_timer = Instant::now();
-                                            debug!("received heatbeat pong {:?}", text);
-                                            let result = stream
-                                                .send(Message::Text(
-                                                    json!({
-                                                        "jsonrpc" : "2.0",
-                                                        "id" : 8212,
-                                                        "method" : "public/test",
-                                                        "params" : {}
-                                                    })
-                                                    .to_string(),
-                                                ))
-                                                .await;
-                                            debug!("sent heatbeat ping {:?}", result);
+                                            "heartbeat" => {
+                                                if hearbeat_timer.elapsed().as_secs() > 35 {
+                                                    warn!("connection died, reconnecting...");
+                                                    break;
+                                                }
+                                                hearbeat_timer = Instant::now();
+                                                debug!("received heatbeat pong {:?}", text);
+                                                let result = stream
+                                                    .send(Message::Text(
+                                                        json!({
+                                                            "jsonrpc" : "2.0",
+                                                            "id" : 8212,
+                                                            "method" : "public/test",
+                                                            "params" : {}
+                                                        })
+                                                        .to_string(),
+                                                    ))
+                                                    .await;
+                                                debug!("sent heatbeat ping {:?}", result);
+                                            }
+                                            _ => {}
                                         }
-                                        _ => {}
-                                    },
-                                    _ => {}
-                                },
+                                    }
+                                }
                                 None => {}
                             }
                         }
-                        _ => {}
-                    },
+                    }
                     Err(error) => {
                         error!("Error: {}", error);
                         break;
@@ -244,7 +247,7 @@ pub struct DeribitInstrument {
     // pub tick_size: f64,
 }
 
-#[derive(Deserialize, Debug, Clone, PartialEq)]
+#[derive(Deserialize, Debug, Clone, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum DeribitInstrumentKind {
     Future,
@@ -322,12 +325,12 @@ impl From<DeribitOrderbook> for OrderbookUpdate {
             bids: deribit_orderbook
                 .bids
                 .iter()
-                .map(|der_ob| OrderbookUpdateLevel::from(der_ob))
+                .map(OrderbookUpdateLevel::from)
                 .collect(),
             asks: deribit_orderbook
                 .asks
                 .iter()
-                .map(|der_ob| OrderbookUpdateLevel::from(der_ob))
+                .map(OrderbookUpdateLevel::from)
                 .collect(),
         }
     }
@@ -347,15 +350,11 @@ impl From<&DeribitInstrument> for OrbitInstrument {
             _ => OrbitContractType::Unimplemented,
         };
 
-        let strike = match deribit_product.strike {
-            Some(strike) => Some(strike as u64),
-            None => None,
-        };
+        let strike = deribit_product.strike.map(|strike| strike as u64);
 
         let expiration_date = {
             let d: DateTime<Utc> = DateTime::from_utc(
-                NaiveDateTime::from_timestamp_millis(deribit_product.expiration_timestamp.clone())
-                    .unwrap(),
+                NaiveDateTime::from_timestamp_millis(deribit_product.expiration_timestamp).unwrap(),
                 Utc,
             );
             let nd = d.date_naive();

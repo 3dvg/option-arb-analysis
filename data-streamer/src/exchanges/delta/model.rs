@@ -5,13 +5,13 @@ use std::{
 
 use crate::{
     OrbitContractType, OrbitEvent, OrbitEventPayload, OrbitExchange, OrbitInstrument,
-    OrderbookUpdate, OrderbookUpdateLevel, OrderbookUpdateType,
+    OrderbookUpdate, OrderbookUpdateLevel,
 };
 use anyhow::Error;
 use chrono::{DateTime, NaiveDateTime, NaiveTime, Utc};
 use futures::{SinkExt, StreamExt};
 use log::*;
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tokio::sync::broadcast::{self, Receiver, Sender};
 use tokio_tungstenite::{connect_async, tungstenite::Message};
@@ -51,14 +51,10 @@ impl DeltaClient {
     ) -> Result<Receiver<OrbitEvent>, Error> {
         // subscription forbidden on this channel with more than 20 symbols\",\"name\":\"l2_orderbook\"
 
-        // let mut tasks = vec![];
-        for (i, chunk) in delta_products.result.chunks(20).enumerate() {
-            let symbols: Vec<String> = chunk.into_iter().map(|p| p.symbol.clone()).collect();
-            // tasks.push(tokio::spawn(Self::_stream_websockets_delta(self.sender.clone(), symbols)));
+        for chunk in delta_products.result.chunks(20) {
+            let symbols: Vec<String> = chunk.iter().map(|p| p.symbol.clone()).collect();
             tokio::spawn(Self::_stream_websockets_delta(self.sender.clone(), symbols));
-            // debug!("streamed ws {} with {} symbols", i, chunk.len());
         }
-        // let _join_result = futures::future::join_all(tasks).await;
         Ok(self.sender.subscribe())
     }
 
@@ -71,7 +67,7 @@ impl DeltaClient {
                 .await
                 .expect("Expected connection with Delta to work");
             // debug!("initialized delta stream");
-            let result = stream
+            let _result = stream
                 .send(Message::Text(
                     json!({
                         "type": "subscribe",
@@ -90,7 +86,7 @@ impl DeltaClient {
 
             // debug!("sent sub message to delta (required): {:?}", result);
 
-            let result = stream
+            let _result = stream
                 .send(Message::Text(
                     json!({
                         "type": "enable_heartbeat"
@@ -285,12 +281,12 @@ impl From<DeltaOrderbook> for OrderbookUpdate {
             bids: delta_orderbook
                 .buy
                 .iter()
-                .map(|level| OrderbookUpdateLevel::from(level))
+                .map(OrderbookUpdateLevel::from)
                 .collect(),
             asks: delta_orderbook
                 .sell
                 .iter()
-                .map(|level| OrderbookUpdateLevel::from(level))
+                .map(OrderbookUpdateLevel::from)
                 .collect(),
         }
     }
@@ -298,14 +294,11 @@ impl From<DeltaOrderbook> for OrderbookUpdate {
 
 impl From<&DeltaProduct> for OrbitInstrument {
     fn from(delta_product: &DeltaProduct) -> Self {
-        let expiration_datetime = match delta_product.settlement_time.clone() {
-            Some(time) => Some(
-                DateTime::parse_from_rfc3339(time.as_str())
-                    .unwrap()
-                    .timestamp_millis(),
-            ),
-            None => None,
-        };
+        let expiration_datetime = delta_product.settlement_time.clone().map(|time| {
+            DateTime::parse_from_rfc3339(time.as_str())
+                .unwrap()
+                .timestamp_millis()
+        });
 
         let expiration_date = match delta_product.settlement_time.clone() {
             Some(time) => {
