@@ -4,8 +4,8 @@ use std::{
 };
 
 use crate::{
-    OrbitContractType, OrbitEvent, OrbitEventPayload, OrbitInstrument, OrderbookUpdate,
-    OrderbookUpdateLevel, OrderbookUpdateType, OrbitExchange,
+    OrbitContractType, OrbitEvent, OrbitEventPayload, OrbitExchange, OrbitInstrument,
+    OrderbookUpdate, OrderbookUpdateLevel, OrderbookUpdateType,
 };
 use anyhow::Error;
 use chrono::{DateTime, NaiveDateTime, NaiveTime, Utc};
@@ -308,17 +308,17 @@ impl From<&DeltaProduct> for OrbitInstrument {
         };
 
         let expiration_date = match delta_product.settlement_time.clone() {
-                Some(time) => {
-                    let nd = DateTime::parse_from_rfc3339(&time).unwrap().date_naive();
-                    let t = NaiveTime::from_hms_opt(0, 0, 0).unwrap();
-                    let a = NaiveDateTime::new(nd, t);
-                    let d: DateTime<Utc> = DateTime::from_local(a, Utc);
-                    let d = d.timestamp_millis();
-                    Some(d)
-                },
-                None => None,
-            };
-        
+            Some(time) => {
+                let nd = DateTime::parse_from_rfc3339(&time).unwrap().date_naive();
+                let t = NaiveTime::from_hms_opt(0, 0, 0).unwrap();
+                let a = NaiveDateTime::new(nd, t);
+                let d: DateTime<Utc> = DateTime::from_local(a, Utc);
+                let d = d.timestamp_millis();
+                Some(d)
+            }
+            None => None,
+        };
+
         let strike = match delta_product.strike.clone() {
             Some(strike) => Some(strike.parse::<u64>().unwrap()),
             None => None,

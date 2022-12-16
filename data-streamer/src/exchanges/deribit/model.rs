@@ -4,11 +4,11 @@ use std::{
 };
 
 use crate::{
-    OrbitContractType, OrbitEvent, OrbitEventPayload, OrbitInstrument, OrderbookUpdate,
-    OrderbookUpdateLevel, OrderbookUpdateType, OrbitExchange,
+    OrbitContractType, OrbitEvent, OrbitEventPayload, OrbitExchange, OrbitInstrument,
+    OrderbookUpdate, OrderbookUpdateLevel, OrderbookUpdateType,
 };
 use anyhow::Error;
-use chrono::{DateTime, Utc, NaiveTime, NaiveDateTime};
+use chrono::{DateTime, NaiveDateTime, NaiveTime, Utc};
 use futures::{SinkExt, StreamExt};
 use log::*;
 use serde::Deserialize;
@@ -34,13 +34,30 @@ impl DeribitClient {
         }
     }
 
-    pub async fn get_instruments(&self) -> Result<DeribitInstrumentsWrapper, Error> {
-        let url = "https://deribit.com/api/v2/public/get_instruments?currency=BTC&expired=false"; //TODO!
+    pub async fn get_currencies(&self) -> Result<DeribitCurrencyWrapper, Error> {
+        let url = "https://test.deribit.com/api/v2/public/get_currencies";
         let response = reqwest::get(url).await?;
         let resp_text = response.text().await?;
-        let resp_json = serde_json::from_str::<DeribitInstrumentsWrapper>(&resp_text)
+        let resp_json = serde_json::from_str::<DeribitCurrencyWrapper>(&resp_text)
             .expect("Error parsing Deribit");
         Ok(resp_json)
+    }
+    // returns a vector because have to send a request per currency
+    pub async fn get_instruments(&self) -> Result<Vec<DeribitInstrumentsWrapper>, Error> {
+        let currencies = self.get_currencies().await?;
+        let mut result = Vec::with_capacity(currencies.result.capacity());
+        for c in currencies.result.iter() {
+            let url = format!(
+                "https://deribit.com/api/v2/public/get_instruments?currency={}&expired=false",
+                c.currency
+            ); //TODO!
+            let response = reqwest::get(url).await?;
+            let resp_text = response.text().await?;
+            let resp_json = serde_json::from_str::<DeribitInstrumentsWrapper>(&resp_text)
+                .expect("Error parsing Deribit");
+            result.push(resp_json);
+        }
+        Ok(result)
     }
 
     pub async fn consume(
@@ -178,6 +195,16 @@ impl DeribitClient {
             sleep *= 2;
         }
     }
+}
+
+#[derive(Deserialize, Debug)]
+pub struct DeribitCurrencyWrapper {
+    result: Vec<DeribitCurrency>,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct DeribitCurrency {
+    currency: String,
 }
 
 #[derive(Clone, Debug)]
@@ -325,15 +352,18 @@ impl From<&DeribitInstrument> for OrbitInstrument {
             None => None,
         };
 
-
         let expiration_date = {
-                let d: DateTime<Utc> = DateTime::from_utc(NaiveDateTime::from_timestamp_millis(deribit_product.expiration_timestamp.clone()).unwrap(), Utc);
-                let nd = d.date_naive();
-                let t = NaiveTime::from_hms_opt(0, 0, 0).unwrap();
-                let a = NaiveDateTime::new(nd, t);
-                let d: DateTime<Utc> = DateTime::from_local(a, Utc);
-                let d = d.timestamp_millis();
-                Some(d)
+            let d: DateTime<Utc> = DateTime::from_utc(
+                NaiveDateTime::from_timestamp_millis(deribit_product.expiration_timestamp.clone())
+                    .unwrap(),
+                Utc,
+            );
+            let nd = d.date_naive();
+            let t = NaiveTime::from_hms_opt(0, 0, 0).unwrap();
+            let a = NaiveDateTime::new(nd, t);
+            let d: DateTime<Utc> = DateTime::from_local(a, Utc);
+            let d = d.timestamp_millis();
+            Some(d)
         };
 
         // debug!("deribit timestamp transformed {:?}, instrument {:?}", deribit_product.expiration_timestamp, deribit_product.instrument_name);

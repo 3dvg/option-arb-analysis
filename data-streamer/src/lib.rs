@@ -1,8 +1,10 @@
+use std::borrow::Borrow;
 use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
 use std::mem::swap;
 
 use anyhow::Error;
+use chrono::{DateTime, NaiveDateTime, Utc};
 use log::debug;
 use serde::__private::de;
 use tokio::sync::mpsc::{self, Receiver, Sender};
@@ -71,69 +73,48 @@ impl OrbitData {
                 }
                 OrbitExchangeClient::Deribit(client) => {
                     let data = client.get_instruments().await?;
-                    let orbit_data: Vec<OrbitInstrument> = data
-                        .result
-                        .iter()
-                        .map(|product| OrbitInstrument::from(product))
-                        .collect();
+                    let mut norm_deribit_instruments = vec![];
+                    data.iter().for_each(|currency| {
+                        let orbit_data: Vec<OrbitInstrument> = currency
+                            .result
+                            .iter()
+                            .map(|product| OrbitInstrument::from(product))
+                            .collect();
+                        norm_deribit_instruments.push(orbit_data);
+                    });
+                    let flattened_norm_data: Vec<OrbitInstrument> =
+                        norm_deribit_instruments.into_iter().flatten().collect();
                     debug!(
                         "received {:?} instruments from {:?}",
-                        orbit_data.len(),
+                        flattened_norm_data.len(),
                         exchange
                     );
-                    instruments.insert(exchange, orbit_data);
+                    instruments.insert(exchange, flattened_norm_data);
                 }
             }
         }
         Ok(instruments)
     }
 
-    pub async fn get_common_instruments(&self) -> Result<Vec<String>, Error> {
+    pub async fn get_common_instruments(&self) -> Result<Vec<OrbitInstrument>, Error> {
         let instruments_map: HashMap<&OrbitExchange, Vec<OrbitInstrument>> =
             self.get_all_instruments().await?;
         // let codes_map: HashMap<OrbitExchange, Vec<String>>
-        let mut map: HashMap<String, &OrbitInstrument> = HashMap::new();
-        let mut result = vec![];
-        let mut debugging = vec![];
+        // let mut map: HashMap<String, &OrbitInstrument> = HashMap::new();
+        let mut set: HashSet<String> = HashSet::new();
+        let mut result: HashSet<String> = HashSet::new();
+        // let mut not_common = vec![];
+        let mut map: HashMap<String, Vec<OrbitInstrument>> = HashMap::new();
+        // let mut debugging = vec![];
         for (i, (exchange, instruments)) in instruments_map.iter().enumerate() {
-            if i == 0 {
-                let orbit_codes =
-                    instruments
-                        .iter()
-                        .fold(HashMap::new(), |mut orbit_codes, instrument| {
-                            orbit_codes.insert(instrument.get_cmp_code(), instrument);
-                            orbit_codes
-                        });
-                map = orbit_codes;
-
-                let dev =
-                    instruments
-                        .iter()
-                        .fold(Vec::new(), |mut orbit_codes, instrument| {
-                            orbit_codes.push(instrument.get_cmp_code());
-                            orbit_codes
-                        });
-                debugging.push(dev);
-                continue;
-            }
-            debug!("2nd round {:?}", exchange);
-            let dev =
-            instruments
-                .iter()
-                .fold(Vec::new(), |mut orbit_codes, instrument| {
-                    orbit_codes.push(instrument.get_cmp_code());
-                    orbit_codes
-                });
-        debugging.push(dev);
+            instruments.iter().for_each(|x| {
+                map.entry(x.get_cmp_code())
+                    .and_modify(|list| list.push(x.clone()))
+                    .or_insert(vec![x.clone()]);
+            });
         }
-
-        // debug!("debugging {:?}", debugging);
-        debugging[0].sort(); 
-        debugging[1].sort();
-
-        for (i, j) in debugging[0].iter().zip(debugging[1].iter()) {
-            debug!("{i}||{j}");
-        }
+        map.retain(|_k, v| v.len() == instruments_map.len());
+        let result = map.into_values().flatten().collect::<Vec<OrbitInstrument>>();
         Ok(result)
     }
 
@@ -158,23 +139,31 @@ impl OrbitData {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct OrbitInstrument {
     symbol: String,
     base: String,
     quote: String,
     strike: Option<u64>,
     expiration_datetime: Option<i64>, // datetime?
-    expiration_date: Option<i64>, // datetime?
+    expiration_date: Option<i64>,     // datetime?
     contract_type: OrbitContractType,
     exchange: OrbitExchange,
 }
 
 impl OrbitInstrument {
     pub fn get_cmp_code(&self) -> String {
+        let d = match self.expiration_date {
+            Some(date) => {
+                let d: DateTime<Utc> =
+                    DateTime::from_utc(NaiveDateTime::from_timestamp_millis(date).unwrap(), Utc);
+                Some(d)
+            }
+            None => None,
+        };
         format!(
-            "{:?}.{}.{:?}.{:?}.",
-            self.contract_type, self.base, self.expiration_date, self.strike
+            "{:?}_{}_{:?}_{:?}",
+            self.contract_type, self.base, d, self.strike
         )
     }
 }
@@ -189,7 +178,7 @@ impl OrbitInstrument {
 //     }
 // }
 
-#[derive(Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum OrbitContractType {
     Spot,
     Future,
@@ -208,7 +197,7 @@ pub enum OrbitExchangeClient {
     Deribit(DeribitClient),
 }
 
-#[derive(Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum OrbitExchange {
     Deribit,
     Delta,
