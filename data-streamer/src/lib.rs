@@ -4,7 +4,7 @@ use std::hash::Hash;
 use anyhow::Error;
 use chrono::{DateTime, NaiveDateTime, Utc};
 use log::debug;
-use tokio::sync::mpsc::{self, Receiver, Sender};
+use tokio::sync::broadcast::{self, Receiver, Sender};
 
 mod exchanges;
 use exchanges::delta::model::DeltaClient;
@@ -20,7 +20,7 @@ pub struct OrbitData {
 
 impl OrbitData {
     pub fn new(exchanges: Vec<OrbitExchange>) -> Self {
-        let (sender, receiver) = mpsc::channel::<OrbitEvent>(10_000); //todo 10_000? check channel congestion
+        let (sender, receiver) = broadcast::channel::<OrbitEvent>(10_000); //todo 10_000? check channel congestion
         let mut clients: HashMap<OrbitExchange, OrbitExchangeClient> =
             HashMap::with_capacity(exchanges.capacity());
 
@@ -28,13 +28,13 @@ impl OrbitData {
             OrbitExchange::Delta => {
                 clients.insert(
                     OrbitExchange::Delta,
-                    OrbitExchangeClient::Delta(DeltaClient::new()),
+                    OrbitExchangeClient::Delta(DeltaClient::new()), //todo pass sender here?
                 );
             }
             OrbitExchange::Deribit => {
                 clients.insert(
                     OrbitExchange::Deribit,
-                    OrbitExchangeClient::Deribit(DeribitClient::new()),
+                    OrbitExchangeClient::Deribit(DeribitClient::new()), //todo pass sender here?
                 );
             }
         });
@@ -110,8 +110,21 @@ impl OrbitData {
         todo!()
     }
 
-    pub fn consume_instruments(symbols: Vec<OrbitInstrument>) {
-        todo!()
+    pub async fn consume_instruments(
+        &self,
+        symbols: Vec<OrbitInstrument>,
+    ) -> Result<Receiver<OrbitEvent>, Error> {
+        for (_exchange, client) in self.clients.iter() {
+            match client {
+                OrbitExchangeClient::Delta(client) => {
+                    client.consume(self.sender.clone(), symbols.clone()).await?;
+                }
+                OrbitExchangeClient::Deribit(client) => {
+                    client.consume(self.sender.clone(), symbols.clone()).await?;
+                }
+            }
+        }
+        Ok(self.sender.subscribe())
     }
 }
 
@@ -181,18 +194,18 @@ pub enum OrbitExchange {
 
 #[derive(Clone, Debug)]
 pub struct OrbitEvent {
-    pub exchange: String, // enum?
+    pub exchange: OrbitExchange, // enum?
     pub symbol: String,
-    pub contract_type: String,      //enum
-    pub payload: OrbitEventPayload, //option
+    pub contract_type: OrbitContractType,   //enum
+    pub payload: Option<OrbitEventPayload>, //option
 }
 
 impl OrbitEvent {
     pub fn new(
-        exchange: String,
+        exchange: OrbitExchange,
         symbol: String,
-        contract_type: String,
-        payload: OrbitEventPayload,
+        contract_type: OrbitContractType,
+        payload: Option<OrbitEventPayload>,
     ) -> Self {
         Self {
             exchange,

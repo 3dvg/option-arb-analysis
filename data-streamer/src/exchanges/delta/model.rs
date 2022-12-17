@@ -5,7 +5,7 @@ use std::{
 
 use crate::{
     OrbitContractType, OrbitEvent, OrbitEventPayload, OrbitExchange, OrbitInstrument,
-    OrderbookUpdate, OrderbookUpdateLevel,
+    OrderbookUpdate, OrderbookUpdateLevel, OrderbookUpdateType,
 };
 use anyhow::Error;
 use chrono::{DateTime, NaiveDateTime, NaiveTime, Utc};
@@ -23,6 +23,12 @@ pub struct DeltaClient {
     heartbeat_timeout: u64,
     sender: Sender<OrbitEvent>,
     receiver: Receiver<OrbitEvent>,
+}
+
+impl Default for DeltaClient {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl DeltaClient {
@@ -45,24 +51,34 @@ impl DeltaClient {
         Ok(resp_json)
     }
 
-    pub async fn consume_delta(
+    pub async fn consume(
         &self,
-        delta_products: DeltaProductWrapper,
-    ) -> Result<Receiver<OrbitEvent>, Error> {
+        sender: Sender<OrbitEvent>,
+        products: Vec<OrbitInstrument>,
+    ) -> Result<(), Error> {
         // subscription forbidden on this channel with more than 20 symbols\",\"name\":\"l2_orderbook\"
-
-        for chunk in delta_products.result.chunks(20) {
-            let symbols: Vec<String> = chunk.iter().map(|p| p.symbol.clone()).collect();
-            tokio::spawn(Self::_stream_websockets_delta(self.sender.clone(), symbols));
+        for chunk in products.chunks(20) {
+            // let symbols: Vec<String> = chunk.iter().map(|p| p.symbol.clone()).collect();
+            tokio::spawn(Self::_stream_websockets_delta(
+                sender.clone(),
+                chunk.to_owned(),
+            ));
         }
-        Ok(self.sender.subscribe())
+        Ok(())
     }
 
-    pub async fn _stream_websockets_delta(sender: Sender<OrbitEvent>, symbols: Vec<String>) {
+    pub async fn _stream_websockets_delta(
+        sender: Sender<OrbitEvent>,
+        symbols: Vec<OrbitInstrument>,
+    ) {
+        let mut instrument_contract_map = HashMap::new();
+        let mut delta_symbols = vec![];
+        for x in symbols.iter() {
+            instrument_contract_map.insert(x.symbol.clone(), x.contract_type.clone());
+            delta_symbols.push(x.symbol.clone());
+        }
         let mut sleep = 100; //ms
         loop {
-            // sender = sender.clone();
-            debug!("consuming delta...");
             let (mut stream, _response) = connect_async("wss://socket.delta.exchange")
                 .await
                 .expect("Expected connection with Delta to work");
@@ -75,7 +91,7 @@ impl DeltaClient {
                             "channels": [
                                 {
                                     "name": "l2_orderbook",
-                                    "symbols": symbols
+                                    "symbols": delta_symbols
                                 }
                             ]
                         }
@@ -123,10 +139,13 @@ impl DeltaClient {
                                             );
 
                                             let orbit_event: OrbitEvent = OrbitEvent {
-                                                exchange: "delta".to_string(),
-                                                symbol: ob.symbol,
-                                                contract_type: "futs opts".to_string(),
-                                                payload: norm_ob,
+                                                exchange: OrbitExchange::Delta,
+                                                symbol: ob.symbol.clone(),
+                                                contract_type: instrument_contract_map
+                                                    .get(&ob.symbol)
+                                                    .unwrap()
+                                                    .clone(),
+                                                payload: Some(norm_ob),
                                             };
 
                                             let _ = sender
@@ -269,8 +288,12 @@ pub struct DeltaSubscriptionChannel {
 
 impl From<&DeltaOrderbookLevel> for OrderbookUpdateLevel {
     fn from(delta_orderbook_level: &DeltaOrderbookLevel) -> Self {
-        // Self (OrderbookUpdateType::New, delta_orderbook_level.limit_price.parse::<f64>().unwrap(), delta_orderbook_level.size as f64)
-        todo!()
+        // orderbookupdatetype is new becuause delta does snapshots so OB is always new
+        Self(
+            OrderbookUpdateType::New,
+            delta_orderbook_level.limit_price.parse::<f64>().unwrap(),
+            delta_orderbook_level.size as f64,
+        )
     }
 }
 

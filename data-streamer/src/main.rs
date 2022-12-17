@@ -44,9 +44,13 @@ async fn main() -> Result<(), Error> {
 
     let products = orbit.get_common_instruments().await?;
     debug!("common products {:?}", products.len());
-    // products.iter().for_each(|p| {
-    //     debug!("== {p}");
-    // });
+
+    let mut orbit_rx = orbit.consume_instruments(products).await?;
+    debug!("--");
+    while let Ok(event) = orbit_rx.recv().await {
+        info!("{:?}", event);
+        info!("chanel {:?} ", orbit_rx.len());
+    }
     Ok(())
 }
 
