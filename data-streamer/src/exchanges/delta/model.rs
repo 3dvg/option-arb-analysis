@@ -356,8 +356,8 @@ impl From<&DeltaProduct> for OrbitInstrument {
         // debug!("delta timestamp transformed {:?}, settlement_time {:?}", expiration, delta_product.settlement_time);
         Self {
             symbol: delta_product.symbol.clone(),
-            base: delta_product.underlying_asset.symbol.clone(),
-            quote: delta_product.quoting_asset.symbol.clone(),
+            base: OrbitCurrency::from(&delta_product.underlying_asset.symbol),
+            quote: OrbitCurrency::from(&delta_product.quoting_asset.symbol),
             strike,
             expiration_datetime,
             expiration_date,

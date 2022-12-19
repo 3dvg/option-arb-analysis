@@ -4,8 +4,8 @@ use std::{
 };
 
 use crate::{
-    OrbitContractType, OrbitEvent, OrbitEventPayload, OrbitExchange, OrbitInstrument,
-    OrderbookUpdate, OrderbookUpdateLevel, OrderbookUpdateType,
+    OrbitContractType, OrbitCurrency, OrbitEvent, OrbitEventPayload, OrbitExchange,
+    OrbitInstrument, OrderbookUpdate, OrderbookUpdateLevel, OrderbookUpdateType,
 };
 use anyhow::Error;
 use chrono::{DateTime, NaiveDateTime, NaiveTime, Utc};
@@ -142,77 +142,71 @@ impl DeribitClient {
                         if let Message::Text(text) = msg {
                             let resp = serde_json::from_str::<HashMap<String, Value>>(&text)
                                 .expect("Error parsing Deribit");
-                            match resp.get("method") {
-                                Some(method) => {
-                                    if let Value::String(method) = method {
-                                        match method.as_str() {
-                                            "subscription" => {
-                                                let ob: DeribitOrderbookDataWrapper =
-                                                    serde_json::from_str(&text)
-                                                        .expect("Can't parse");
+                            if let Some(method) = resp.get("method") {
+                                if let Value::String(method) = method {
+                                    match method.as_str() {
+                                        "subscription" => {
+                                            let ob: DeribitOrderbookDataWrapper =
+                                                serde_json::from_str(&text).expect("Can't parse");
 
-                                                let norm_ob: OrbitEventPayload =
-                                                    OrbitEventPayload::OrderbookUpdate(
-                                                        OrderbookUpdate::from(
-                                                            ob.params.data.clone(),
-                                                        ),
-                                                    );
-
-                                                let contract_type = symbol_details_map
-                                                    .get(&ob.params.data.instrument_name)
-                                                    .map(|x| x.contract_type.clone());
-
-                                                let currency = symbol_details_map
-                                                    .get(&ob.params.data.instrument_name)
-                                                    .map(|x| x.base.clone());
-
-                                                let expiration = symbol_details_map
-                                                    .get(&ob.params.data.instrument_name)
-                                                    .and_then(|x| x.expiration_datetime);
-
-                                                let strike = symbol_details_map
-                                                    .get(&ob.params.data.instrument_name)
-                                                    .and_then(|x| x.strike);
-
-                                                let orbit_event = OrbitEvent::new(
-                                                    OrbitExchange::Deribit,
-                                                    ob.params.data.instrument_name,
-                                                    currency,
-                                                    contract_type,
-                                                    expiration,
-                                                    strike,
-                                                    Some(norm_ob),
+                                            let norm_ob: OrbitEventPayload =
+                                                OrbitEventPayload::OrderbookUpdate(
+                                                    OrderbookUpdate::from(ob.params.data.clone()),
                                                 );
-                                                // debug!("-- {:?}", ob);
-                                                let _ = sender
-                                                    .send(orbit_event)
-                                                    .map_err(|err| error!("Error: {}", err));
-                                            }
-                                            "heartbeat" => {
-                                                if hearbeat_timer.elapsed().as_secs() > 35 {
-                                                    warn!("connection died, reconnecting...");
-                                                    break;
-                                                }
-                                                hearbeat_timer = Instant::now();
-                                                debug!("received heatbeat pong {:?}", text);
-                                                let result = stream
-                                                    .send(Message::Text(
-                                                        json!({
-                                                            "jsonrpc" : "2.0",
-                                                            "id" : 8212,
-                                                            "method" : "public/test",
-                                                            "params" : {}
-                                                        })
-                                                        .to_string(),
-                                                    ))
-                                                    .await;
-                                                debug!("sent heatbeat ping");
-                                            }
-                                            _ => {}
+
+                                            let contract_type = symbol_details_map
+                                                .get(&ob.params.data.instrument_name)
+                                                .map(|x| x.contract_type.clone());
+
+                                            let currency = symbol_details_map
+                                                .get(&ob.params.data.instrument_name)
+                                                .map(|x| x.base.clone());
+
+                                            let expiration = symbol_details_map
+                                                .get(&ob.params.data.instrument_name)
+                                                .and_then(|x| x.expiration_datetime);
+
+                                            let strike = symbol_details_map
+                                                .get(&ob.params.data.instrument_name)
+                                                .and_then(|x| x.strike);
+
+                                            let orbit_event = OrbitEvent::new(
+                                                OrbitExchange::Deribit,
+                                                ob.params.data.instrument_name,
+                                                currency,
+                                                contract_type,
+                                                expiration,
+                                                strike,
+                                                Some(norm_ob),
+                                            );
+                                            // debug!("-- {:?}", ob);
+                                            let _ = sender
+                                                .send(orbit_event)
+                                                .map_err(|err| error!("Error: {}", err));
                                         }
+                                        "heartbeat" => {
+                                            if hearbeat_timer.elapsed().as_secs() > 35 {
+                                                warn!("connection died, reconnecting...");
+                                                break;
+                                            }
+                                            hearbeat_timer = Instant::now();
+                                            debug!("received heatbeat pong {:?}", text);
+                                            let result = stream
+                                                .send(Message::Text(
+                                                    json!({
+                                                        "jsonrpc" : "2.0",
+                                                        "id" : 8212,
+                                                        "method" : "public/test",
+                                                        "params" : {}
+                                                    })
+                                                    .to_string(),
+                                                ))
+                                                .await;
+                                            debug!("sent heatbeat ping");
+                                        }
+                                        _ => {}
                                     }
                                 }
-                                None => {}
                             }
                         }
                     }
@@ -393,6 +387,18 @@ impl From<&DeribitInstrument> for OrbitContractType {
         }
     }
 }
+
+impl From<&String> for OrbitCurrency {
+    fn from(deribit_instrument: &String) -> Self {
+        match deribit_instrument.to_lowercase().as_str() {
+            "btc" => OrbitCurrency::Btc,
+            "eth" => OrbitCurrency::Eth,
+            "sol" => OrbitCurrency::Sol,
+            _ => OrbitCurrency::Unimplemented,
+        }
+    }
+}
+
 impl From<&DeribitInstrument> for OrbitInstrument {
     fn from(deribit_product: &DeribitInstrument) -> Self {
         let contract_type = OrbitContractType::from(deribit_product);
@@ -414,8 +420,8 @@ impl From<&DeribitInstrument> for OrbitInstrument {
         // debug!("deribit timestamp transformed {:?}, instrument {:?}", deribit_product.expiration_timestamp, deribit_product.instrument_name);
         Self {
             symbol: deribit_product.instrument_name.clone(),
-            base: deribit_product.base_currency.clone(),
-            quote: deribit_product.quote_currency.clone(),
+            base: OrbitCurrency::from(&deribit_product.base_currency),
+            quote: OrbitCurrency::from(&deribit_product.quote_currency),
             strike,
             expiration_datetime: Some(deribit_product.expiration_timestamp),
             expiration_date,

@@ -27,6 +27,7 @@ async fn main() -> Result<(), Error> {
 
     while let Ok(event) = orbit_rx.recv().await {
         info!("{:?}", event);
+        // orbit_storage.process(event);
     }
     Ok(())
 }
