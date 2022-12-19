@@ -5,7 +5,7 @@ use std::{
 
 use crate::{
     OrbitContractType, OrbitEvent, OrbitEventPayload, OrbitExchange, OrbitInstrument,
-    OrderbookUpdate, OrderbookUpdateLevel, OrderbookUpdateType,
+    OrderbookUpdate, OrderbookUpdateLevel, OrderbookUpdateType, OrbitCurrency,
 };
 use anyhow::Error;
 use chrono::{DateTime, NaiveDateTime, NaiveTime, Utc};
@@ -71,10 +71,10 @@ impl DeltaClient {
         sender: Sender<OrbitEvent>,
         symbols: Vec<OrbitInstrument>,
     ) {
-        let mut instrument_contract_map = HashMap::new();
+        let mut symbol_details_map: HashMap<String, OrbitInstrument> = HashMap::new();
         let mut delta_symbols = vec![];
         for x in symbols.iter() {
-            instrument_contract_map.insert(x.symbol.clone(), x.contract_type.clone());
+            symbol_details_map.insert(x.symbol.clone(), x.clone());
             delta_symbols.push(x.symbol.clone());
         }
         let mut sleep = 100; //ms
@@ -141,10 +141,8 @@ impl DeltaClient {
                                             let orbit_event: OrbitEvent = OrbitEvent {
                                                 exchange: OrbitExchange::Delta,
                                                 symbol: ob.symbol.clone(),
-                                                contract_type: instrument_contract_map
-                                                    .get(&ob.symbol)
-                                                    .unwrap()
-                                                    .clone(),
+                                                currency: symbol_details_map.get(&ob.symbol).map(|x| x.base.clone()),
+                                                contract_type: symbol_details_map.get(&ob.symbol).map(|x| x.contract_type.clone()),
                                                 payload: Some(norm_ob),
                                             };
 

@@ -80,7 +80,7 @@ impl DeribitClient {
         orbit_instruments: Vec<OrbitInstrument>,
     ) {
         let mut deribit_symbols = vec![];
-        let mut instrument_contract_map = HashMap::new();
+        let mut symbol_details_map: HashMap<String, OrbitInstrument> = HashMap::new();
         for x in orbit_instruments.iter() {
             if x.contract_type == OrbitContractType::Future
                 || x.contract_type == OrbitContractType::PutOption
@@ -89,7 +89,7 @@ impl DeribitClient {
                 || x.contract_type == OrbitContractType::Spot
             {
                 deribit_symbols.push(format!("book.{}.100ms", x.symbol)); //raw or 100ms
-                instrument_contract_map.insert(x.symbol.clone(), x.contract_type.clone());
+                symbol_details_map.insert(x.symbol.clone(), x.clone());
             }
         }
 
@@ -150,19 +150,24 @@ impl DeribitClient {
                                                 let ob: DeribitOrderbookDataWrapper =
                                                     serde_json::from_str(&text)
                                                         .expect("Can't parse");
+                                                        
                                                 let norm_ob: OrbitEventPayload =
                                                     OrbitEventPayload::OrderbookUpdate(
                                                         OrderbookUpdate::from(
                                                             ob.params.data.clone(),
                                                         ),
                                                     );
-                                                let contract_type = instrument_contract_map
-                                                    .get(&ob.params.data.instrument_name)
-                                                    .unwrap()
-                                                    .clone();
+
+                                                let contract_type = symbol_details_map
+                                                    .get(&ob.params.data.instrument_name).map(|x| x.contract_type.clone());
+
+                                                    let currency = symbol_details_map
+                                                        .get(&ob.params.data.instrument_name).map(|x| x.base.clone());
+                                                
                                                 let orbit_event = OrbitEvent::new(
                                                     OrbitExchange::Deribit,
                                                     ob.params.data.instrument_name,
+                                                    currency,
                                                     contract_type,
                                                     Some(norm_ob),
                                                 );

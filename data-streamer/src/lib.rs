@@ -1,5 +1,6 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, BTreeMap};
 use std::hash::Hash;
+use std::time::Instant;
 
 use anyhow::Error;
 use chrono::{DateTime, NaiveDateTime, Utc};
@@ -9,6 +10,7 @@ use tokio::sync::broadcast::{self, Receiver, Sender};
 mod exchanges;
 use exchanges::delta::model::DeltaClient;
 use exchanges::deribit::model::DeribitClient;
+use uuid::Uuid;
 
 #[derive(Debug)]
 pub struct OrbitData {
@@ -128,7 +130,7 @@ impl OrbitData {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug)]
 pub struct OrbitInstrument {
     symbol: String,
     base: String,
@@ -180,6 +182,57 @@ pub enum OrbitContractType {
     Unimplemented,
 }
 
+pub struct OrbitOrderbookStorage {
+    pub id: Uuid,
+    pub storage: BTreeMap<(OrbitExchange, OrbitCurrency), [OrbitContractType; 3]>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+impl OrbitOrderbookStorage {
+    pub fn new() -> Self {
+        Self { 
+            id: Uuid::new_v4(),
+            storage: BTreeMap::new(), 
+            created_at: chrono::offset::Utc::now(), 
+            updated_at: chrono::offset::Utc::now(),
+        }
+    }
+
+    // pub fn insert(&self, event: OrbitEvent) -> Result<Uuid, Error> {
+        // count.entry(x).and_modify(|curr| *curr += 1).or_insert(1);
+    //     let key_data = (event.exchange, event.currency);
+    //     let data = self.storage.get();
+    // }
+}
+
+#[derive(Clone, Debug)]
+pub enum OrbitContractTypeOrderbook {
+    Future(OrbitFutureOrderbook),
+    Option(OrbitOptionOrderbook),
+    Perpetual(OrbitPerpetualOrderbook)
+}
+
+pub type Expiration = i64;
+pub type OrbitPerpetualOrderbook = OrbitOrderbook;
+pub type Strike = u64;
+pub type OrbitFutureOrderbook = BTreeMap<Expiration, OrbitOrderbook>;
+pub type OrbitOptionOrderbook = BTreeMap<Expiration, BTreeMap<Strike, OrbitOptionChainLevel>>;
+
+#[derive(Clone, Debug)]
+pub struct OrbitOrderbook {
+    id: Uuid,
+    timestamp: i64,
+    bids: Vec<OrderbookUpdateLevel>,
+    asks: Vec<OrderbookUpdateLevel>,
+}
+
+#[derive(Clone, Debug)]
+pub struct OrbitOptionChainLevel {
+    puts: Vec<OrbitOrderbook>,
+    calls: Vec<OrbitOrderbook>,
+}
+
 #[derive(Debug)]
 pub enum OrbitExchangeClient {
     Delta(DeltaClient),
@@ -196,7 +249,8 @@ pub enum OrbitExchange {
 pub struct OrbitEvent {
     pub exchange: OrbitExchange, // enum?
     pub symbol: String,
-    pub contract_type: OrbitContractType,   //enum
+    pub currency: Option<String>,
+    pub contract_type: Option<OrbitContractType>,   //enum
     pub payload: Option<OrbitEventPayload>, //option
 }
 
@@ -204,12 +258,14 @@ impl OrbitEvent {
     pub fn new(
         exchange: OrbitExchange,
         symbol: String,
-        contract_type: OrbitContractType,
+        currency: Option<String>,
+        contract_type: Option<OrbitContractType>,
         payload: Option<OrbitEventPayload>,
     ) -> Self {
         Self {
             exchange,
             symbol,
+            currency,
             contract_type,
             payload,
         }
@@ -242,4 +298,11 @@ pub enum OrderbookUpdateType {
     New,
     Change,
     Delete,
+}
+
+#[derive(Clone, Debug)]
+pub enum OrbitCurrency {
+    Btc, 
+    Eth, 
+    Sol 
 }
