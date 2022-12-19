@@ -161,14 +161,19 @@ impl DeribitClient {
                                                 let contract_type = symbol_details_map
                                                     .get(&ob.params.data.instrument_name).map(|x| x.contract_type.clone());
 
-                                                    let currency = symbol_details_map
-                                                        .get(&ob.params.data.instrument_name).map(|x| x.base.clone());
+                                                let currency = symbol_details_map
+                                                    .get(&ob.params.data.instrument_name).map(|x| x.base.clone());
+
+                                                let expiration = symbol_details_map
+                                                    .get(&ob.params.data.instrument_name).and_then(|x| x.expiration_datetime);
+                                                
                                                 
                                                 let orbit_event = OrbitEvent::new(
                                                     OrbitExchange::Deribit,
                                                     ob.params.data.instrument_name,
                                                     currency,
                                                     contract_type,
+                                                    expiration,
                                                     Some(norm_ob),
                                                 );
                                                 // debug!("-- {:?}", ob);

@@ -144,6 +144,7 @@ impl DeltaClient {
                                                 currency: symbol_details_map.get(&ob.symbol).map(|x| x.base.clone()),
                                                 contract_type: symbol_details_map.get(&ob.symbol).map(|x| x.contract_type.clone()),
                                                 payload: Some(norm_ob),
+                                                expiration: symbol_details_map.get(&ob.symbol).and_then(|x| x.expiration_date),
                                             };
 
                                             let _ = sender

@@ -5,6 +5,7 @@ use std::time::Instant;
 use anyhow::Error;
 use chrono::{DateTime, NaiveDateTime, Utc};
 use log::debug;
+use ordered_float::OrderedFloat;
 use tokio::sync::broadcast::{self, Receiver, Sender};
 
 mod exchanges;
@@ -184,7 +185,7 @@ pub enum OrbitContractType {
 
 pub struct OrbitOrderbookStorage {
     pub id: Uuid,
-    pub storage: BTreeMap<(OrbitExchange, OrbitCurrency), [OrbitContractType; 3]>,
+    pub storage: BTreeMap<(OrbitExchange, String), [OrbitContractTypeOrderbook; 3]>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -199,11 +200,57 @@ impl OrbitOrderbookStorage {
         }
     }
 
-    // pub fn insert(&self, event: OrbitEvent) -> Result<Uuid, Error> {
-        // count.entry(x).and_modify(|curr| *curr += 1).or_insert(1);
-    //     let key_data = (event.exchange, event.currency);
-    //     let data = self.storage.get();
-    // }
+    pub fn process(&mut self, event: OrbitEvent) -> Result<(), Error> {
+        let k = (event.exchange, event.currency.unwrap());
+        let contract_type = self.storage.get_mut(&k).unwrap(); // static sized array, we know length and items beforehand
+        match event.contract_type.expect("This should unwrap fine") {
+            OrbitContractType::Future => {
+                match &mut contract_type[0] {
+                    OrbitContractTypeOrderbook::Future(orderbook) => {
+                        let k = event.expiration.expect("futures should always have expiration");
+                        orderbook.get_mut(&k).map(|orbit_orderbook| {
+                            event.payload.map(|p| match p {
+                                OrbitEventPayload::OrderbookUpdate(event_orderbook) => {
+                                    event_orderbook.asks.iter().for_each(|ask| {
+                                        match ask.0 {
+                                            OrderbookUpdateType::New => {
+                                                orbit_orderbook.asks.insert(OrderedFloat(ask.1), ask.2);
+                                            },
+                                            OrderbookUpdateType::Change => {
+                                                orbit_orderbook.asks.insert(OrderedFloat(ask.1), ask.2); // todo, check entry.and modify....
+                                            },
+                                            OrderbookUpdateType::Delete => {
+                                                orbit_orderbook.asks.remove(&OrderedFloat(ask.1));
+                                            },
+                                        }
+                                    });
+
+                                    event_orderbook.bids.iter().for_each(|bid| {
+                                        match bid.0 {
+                                            OrderbookUpdateType::New => {
+                                                orbit_orderbook.bids.insert(OrderedFloat(bid.1), bid.2);
+                                            },
+                                            OrderbookUpdateType::Change => {
+                                                orbit_orderbook.bids.insert(OrderedFloat(bid.1), bid.2); // todo, check entry.and modify....
+                                            },
+                                            OrderbookUpdateType::Delete => {
+                                                orbit_orderbook.bids.remove(&OrderedFloat(bid.1));
+                                            },
+                                        }
+                                    });
+                                }
+                            })
+                        });
+                    }
+                    _ => {}
+                }
+            }
+            OrbitContractType::PutOption | OrbitContractType::CallOption => {}
+            OrbitContractType::PerpetualFuture => {}
+            _ => {}
+        }
+        Ok(())
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -216,8 +263,8 @@ pub enum OrbitContractTypeOrderbook {
 pub type Expiration = i64;
 pub type OrbitPerpetualOrderbook = OrbitOrderbook;
 pub type Strike = u64;
-pub type OrbitFutureOrderbook = BTreeMap<Expiration, OrbitOrderbook>;
-pub type OrbitOptionOrderbook = BTreeMap<Expiration, BTreeMap<Strike, OrbitOptionChainLevel>>;
+pub type OrbitFutureOrderbook = BTreeMap<Expiration, OrbitStorageOrderbook>;
+pub type OrbitOptionOrderbook = BTreeMap<Expiration, BTreeMap<Strike, OrbitStorageOptionOrderbook>>;
 
 #[derive(Clone, Debug)]
 pub struct OrbitOrderbook {
@@ -227,10 +274,20 @@ pub struct OrbitOrderbook {
     asks: Vec<OrderbookUpdateLevel>,
 }
 
+pub type OrbitOrderbookPrice = OrderedFloat<f64>;
+pub type OrbitOrderbookAmount = f64;
 #[derive(Clone, Debug)]
-pub struct OrbitOptionChainLevel {
-    puts: Vec<OrbitOrderbook>,
-    calls: Vec<OrbitOrderbook>,
+pub struct OrbitStorageOrderbook {
+    id: Uuid,
+    timestamp: i64,
+    bids: BTreeMap<OrbitOrderbookPrice, OrbitOrderbookAmount>,
+    asks: BTreeMap<OrbitOrderbookPrice, OrbitOrderbookAmount>,
+}
+
+#[derive(Clone, Debug)]
+pub struct OrbitStorageOptionOrderbook {
+    puts: BTreeMap<Strike, OrbitOrderbook>,
+    calls: BTreeMap<Strike, OrbitOrderbook>,
 }
 
 #[derive(Debug)]
@@ -239,7 +296,7 @@ pub enum OrbitExchangeClient {
     Deribit(DeribitClient),
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum OrbitExchange {
     Deribit,
     Delta,
@@ -247,11 +304,12 @@ pub enum OrbitExchange {
 
 #[derive(Clone, Debug)]
 pub struct OrbitEvent {
-    pub exchange: OrbitExchange, // enum?
+    pub exchange: OrbitExchange, 
     pub symbol: String,
     pub currency: Option<String>,
-    pub contract_type: Option<OrbitContractType>,   //enum
-    pub payload: Option<OrbitEventPayload>, //option
+    pub contract_type: Option<OrbitContractType>,   
+    pub expiration: Option<i64>,
+    pub payload: Option<OrbitEventPayload>, 
 }
 
 impl OrbitEvent {
@@ -260,6 +318,7 @@ impl OrbitEvent {
         symbol: String,
         currency: Option<String>,
         contract_type: Option<OrbitContractType>,
+        expiration: Option<i64>,
         payload: Option<OrbitEventPayload>,
     ) -> Self {
         Self {
@@ -267,6 +326,7 @@ impl OrbitEvent {
             symbol,
             currency,
             contract_type,
+            expiration,
             payload,
         }
     }
