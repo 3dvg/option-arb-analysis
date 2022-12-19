@@ -14,7 +14,6 @@ async fn main() -> Result<(), Error> {
         .filter_level(LevelFilter::Debug)
         .init();
 
-
     let exchanges = vec![OrbitExchange::Delta, OrbitExchange::Deribit];
     let orbit_data = OrbitData::new(exchanges);
     debug!("orbit {:?}", orbit_data);
@@ -23,9 +22,9 @@ async fn main() -> Result<(), Error> {
     debug!("common products {:?}", products.len());
 
     let mut orbit_rx = orbit_data.consume_instruments(products).await?;
-    
+
     let mut orbit_storage = OrbitOrderbookStorage::new();
-    
+
     while let Ok(event) = orbit_rx.recv().await {
         info!("{:?}", event);
     }

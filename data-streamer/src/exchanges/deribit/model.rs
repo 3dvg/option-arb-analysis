@@ -150,7 +150,7 @@ impl DeribitClient {
                                                 let ob: DeribitOrderbookDataWrapper =
                                                     serde_json::from_str(&text)
                                                         .expect("Can't parse");
-                                                        
+
                                                 let norm_ob: OrbitEventPayload =
                                                     OrbitEventPayload::OrderbookUpdate(
                                                         OrderbookUpdate::from(
@@ -159,21 +159,28 @@ impl DeribitClient {
                                                     );
 
                                                 let contract_type = symbol_details_map
-                                                    .get(&ob.params.data.instrument_name).map(|x| x.contract_type.clone());
+                                                    .get(&ob.params.data.instrument_name)
+                                                    .map(|x| x.contract_type.clone());
 
                                                 let currency = symbol_details_map
-                                                    .get(&ob.params.data.instrument_name).map(|x| x.base.clone());
+                                                    .get(&ob.params.data.instrument_name)
+                                                    .map(|x| x.base.clone());
 
                                                 let expiration = symbol_details_map
-                                                    .get(&ob.params.data.instrument_name).and_then(|x| x.expiration_datetime);
-                                                
-                                                
+                                                    .get(&ob.params.data.instrument_name)
+                                                    .and_then(|x| x.expiration_datetime);
+
+                                                let strike = symbol_details_map
+                                                    .get(&ob.params.data.instrument_name)
+                                                    .and_then(|x| x.strike);
+
                                                 let orbit_event = OrbitEvent::new(
                                                     OrbitExchange::Deribit,
                                                     ob.params.data.instrument_name,
                                                     currency,
                                                     contract_type,
                                                     expiration,
+                                                    strike,
                                                     Some(norm_ob),
                                                 );
                                                 // debug!("-- {:?}", ob);

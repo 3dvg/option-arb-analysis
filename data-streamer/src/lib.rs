@@ -1,4 +1,4 @@
-use std::collections::{HashMap, BTreeMap};
+use std::collections::{BTreeMap, HashMap};
 use std::hash::Hash;
 use std::time::Instant;
 
@@ -192,10 +192,10 @@ pub struct OrbitOrderbookStorage {
 
 impl OrbitOrderbookStorage {
     pub fn new() -> Self {
-        Self { 
+        Self {
             id: Uuid::new_v4(),
-            storage: BTreeMap::new(), 
-            created_at: chrono::offset::Utc::now(), 
+            storage: BTreeMap::new(),
+            created_at: chrono::offset::Utc::now(),
             updated_at: chrono::offset::Utc::now(),
         }
     }
@@ -207,35 +207,47 @@ impl OrbitOrderbookStorage {
             OrbitContractType::Future => {
                 match &mut contract_type[0] {
                     OrbitContractTypeOrderbook::Future(orderbook) => {
-                        let k = event.expiration.expect("futures should always have expiration");
+                        let k = event
+                            .expiration
+                            .expect("futures should always have expiration");
                         orderbook.get_mut(&k).map(|orbit_orderbook| {
                             event.payload.map(|p| match p {
                                 OrbitEventPayload::OrderbookUpdate(event_orderbook) => {
                                     event_orderbook.asks.iter().for_each(|ask| {
                                         match ask.0 {
                                             OrderbookUpdateType::New => {
-                                                orbit_orderbook.asks.insert(OrderedFloat(ask.1), ask.2);
-                                            },
+                                                orbit_orderbook
+                                                    .asks
+                                                    .insert(OrderedFloat(ask.1), ask.2);
+                                            }
                                             OrderbookUpdateType::Change => {
-                                                orbit_orderbook.asks.insert(OrderedFloat(ask.1), ask.2); // todo, check entry.and modify....
-                                            },
+                                                orbit_orderbook
+                                                    .asks
+                                                    .insert(OrderedFloat(ask.1), ask.2);
+                                                // todo, check entry.and modify....
+                                            }
                                             OrderbookUpdateType::Delete => {
                                                 orbit_orderbook.asks.remove(&OrderedFloat(ask.1));
-                                            },
+                                            }
                                         }
                                     });
 
                                     event_orderbook.bids.iter().for_each(|bid| {
                                         match bid.0 {
                                             OrderbookUpdateType::New => {
-                                                orbit_orderbook.bids.insert(OrderedFloat(bid.1), bid.2);
-                                            },
+                                                orbit_orderbook
+                                                    .bids
+                                                    .insert(OrderedFloat(bid.1), bid.2);
+                                            }
                                             OrderbookUpdateType::Change => {
-                                                orbit_orderbook.bids.insert(OrderedFloat(bid.1), bid.2); // todo, check entry.and modify....
-                                            },
+                                                orbit_orderbook
+                                                    .bids
+                                                    .insert(OrderedFloat(bid.1), bid.2);
+                                                // todo, check entry.and modify....
+                                            }
                                             OrderbookUpdateType::Delete => {
                                                 orbit_orderbook.bids.remove(&OrderedFloat(bid.1));
-                                            },
+                                            }
                                         }
                                     });
                                 }
@@ -245,8 +257,176 @@ impl OrbitOrderbookStorage {
                     _ => {}
                 }
             }
-            OrbitContractType::PutOption | OrbitContractType::CallOption => {}
-            OrbitContractType::PerpetualFuture => {}
+            OrbitContractType::CallOption => {
+                match &mut contract_type[1] {
+                    OrbitContractTypeOrderbook::Option(orderbook) => {
+                        let k = event
+                            .expiration
+                            .expect("options should always have expiration");
+                        orderbook.get_mut(&k).map(|expiration| {
+                            let k = event.strike.expect("options should always have strike");
+                            expiration.get_mut(&k).map(|orbit_option_orderbook| {
+                                event.payload.map(|p| match p {
+                                    OrbitEventPayload::OrderbookUpdate(event_orderbook) => {
+                                        event_orderbook.asks.iter().for_each(|ask| {
+                                            match ask.0 {
+                                                OrderbookUpdateType::New => {
+                                                    orbit_option_orderbook
+                                                        .calls
+                                                        .asks
+                                                        .insert(OrderedFloat(ask.1), ask.2);
+                                                }
+                                                OrderbookUpdateType::Change => {
+                                                    orbit_option_orderbook
+                                                        .calls
+                                                        .asks
+                                                        .insert(OrderedFloat(ask.1), ask.2);
+                                                    // todo, check entry.and modify....
+                                                }
+                                                OrderbookUpdateType::Delete => {
+                                                    orbit_option_orderbook
+                                                        .calls
+                                                        .asks
+                                                        .remove(&OrderedFloat(ask.1));
+                                                }
+                                            }
+                                        });
+                                        event_orderbook.bids.iter().for_each(|bid| {
+                                            match bid.0 {
+                                                OrderbookUpdateType::New => {
+                                                    orbit_option_orderbook
+                                                        .calls
+                                                        .bids
+                                                        .insert(OrderedFloat(bid.1), bid.2);
+                                                }
+                                                OrderbookUpdateType::Change => {
+                                                    orbit_option_orderbook
+                                                        .calls
+                                                        .bids
+                                                        .insert(OrderedFloat(bid.1), bid.2);
+                                                    // todo, check entry.and modify....
+                                                }
+                                                OrderbookUpdateType::Delete => {
+                                                    orbit_option_orderbook
+                                                        .calls
+                                                        .bids
+                                                        .remove(&OrderedFloat(bid.1));
+                                                }
+                                            }
+                                        });
+                                    }
+                                });
+                            });
+                        });
+                    }
+                    _ => {}
+                }
+            }
+            OrbitContractType::PutOption => {
+                match &mut contract_type[1] {
+                    OrbitContractTypeOrderbook::Option(orderbook) => {
+                        let k = event
+                            .expiration
+                            .expect("options should always have expiration");
+                        orderbook.get_mut(&k).map(|expiration| {
+                            let k = event.strike.expect("options should always have strike");
+                            expiration.get_mut(&k).map(|orbit_option_orderbook| {
+                                event.payload.map(|p| match p {
+                                    OrbitEventPayload::OrderbookUpdate(event_orderbook) => {
+                                        event_orderbook.asks.iter().for_each(|ask| {
+                                            match ask.0 {
+                                                OrderbookUpdateType::New => {
+                                                    orbit_option_orderbook
+                                                        .puts
+                                                        .asks
+                                                        .insert(OrderedFloat(ask.1), ask.2);
+                                                }
+                                                OrderbookUpdateType::Change => {
+                                                    orbit_option_orderbook
+                                                        .puts
+                                                        .asks
+                                                        .insert(OrderedFloat(ask.1), ask.2);
+                                                    // todo, check entry.and modify....
+                                                }
+                                                OrderbookUpdateType::Delete => {
+                                                    orbit_option_orderbook
+                                                        .puts
+                                                        .asks
+                                                        .remove(&OrderedFloat(ask.1));
+                                                }
+                                            }
+                                        });
+                                        event_orderbook.bids.iter().for_each(|bid| {
+                                            match bid.0 {
+                                                OrderbookUpdateType::New => {
+                                                    orbit_option_orderbook
+                                                        .puts
+                                                        .bids
+                                                        .insert(OrderedFloat(bid.1), bid.2);
+                                                }
+                                                OrderbookUpdateType::Change => {
+                                                    orbit_option_orderbook
+                                                        .puts
+                                                        .bids
+                                                        .insert(OrderedFloat(bid.1), bid.2);
+                                                    // todo, check entry.and modify....
+                                                }
+                                                OrderbookUpdateType::Delete => {
+                                                    orbit_option_orderbook
+                                                        .puts
+                                                        .bids
+                                                        .remove(&OrderedFloat(bid.1));
+                                                }
+                                            }
+                                        });
+                                    }
+                                });
+                            });
+                        });
+                    }
+                    _ => {}
+                }
+            }
+            OrbitContractType::PerpetualFuture => {
+                match &mut contract_type[2] {
+                    OrbitContractTypeOrderbook::Perpetual(orbit_orderbook) => {
+                        event.payload.map(|p| match p {
+                            OrbitEventPayload::OrderbookUpdate(event_orderbook) => {
+                                event_orderbook.asks.iter().for_each(|ask| {
+                                    match ask.0 {
+                                        OrderbookUpdateType::New => {
+                                            orbit_orderbook.asks.insert(OrderedFloat(ask.1), ask.2);
+                                        }
+                                        OrderbookUpdateType::Change => {
+                                            orbit_orderbook.asks.insert(OrderedFloat(ask.1), ask.2);
+                                            // todo, check entry.and modify....
+                                        }
+                                        OrderbookUpdateType::Delete => {
+                                            orbit_orderbook.asks.remove(&OrderedFloat(ask.1));
+                                        }
+                                    }
+                                });
+
+                                event_orderbook.bids.iter().for_each(|bid| {
+                                    match bid.0 {
+                                        OrderbookUpdateType::New => {
+                                            orbit_orderbook.bids.insert(OrderedFloat(bid.1), bid.2);
+                                        }
+                                        OrderbookUpdateType::Change => {
+                                            orbit_orderbook.bids.insert(OrderedFloat(bid.1), bid.2);
+                                            // todo, check entry.and modify....
+                                        }
+                                        OrderbookUpdateType::Delete => {
+                                            orbit_orderbook.bids.remove(&OrderedFloat(bid.1));
+                                        }
+                                    }
+                                });
+                            }
+                        });
+                    }
+                    _ => {}
+                }
+            }
             _ => {}
         }
         Ok(())
@@ -257,12 +437,12 @@ impl OrbitOrderbookStorage {
 pub enum OrbitContractTypeOrderbook {
     Future(OrbitFutureOrderbook),
     Option(OrbitOptionOrderbook),
-    Perpetual(OrbitPerpetualOrderbook)
+    Perpetual(OrbitPerpetualOrderbook),
 }
 
 pub type Expiration = i64;
-pub type OrbitPerpetualOrderbook = OrbitOrderbook;
 pub type Strike = u64;
+pub type OrbitPerpetualOrderbook = OrbitStorageOrderbook;
 pub type OrbitFutureOrderbook = BTreeMap<Expiration, OrbitStorageOrderbook>;
 pub type OrbitOptionOrderbook = BTreeMap<Expiration, BTreeMap<Strike, OrbitStorageOptionOrderbook>>;
 
@@ -286,8 +466,8 @@ pub struct OrbitStorageOrderbook {
 
 #[derive(Clone, Debug)]
 pub struct OrbitStorageOptionOrderbook {
-    puts: BTreeMap<Strike, OrbitOrderbook>,
-    calls: BTreeMap<Strike, OrbitOrderbook>,
+    puts: OrbitStorageOrderbook,
+    calls: OrbitStorageOrderbook,
 }
 
 #[derive(Debug)]
@@ -304,12 +484,13 @@ pub enum OrbitExchange {
 
 #[derive(Clone, Debug)]
 pub struct OrbitEvent {
-    pub exchange: OrbitExchange, 
+    pub exchange: OrbitExchange,
     pub symbol: String,
     pub currency: Option<String>,
-    pub contract_type: Option<OrbitContractType>,   
+    pub contract_type: Option<OrbitContractType>,
     pub expiration: Option<i64>,
-    pub payload: Option<OrbitEventPayload>, 
+    pub strike: Option<Strike>,
+    pub payload: Option<OrbitEventPayload>,
 }
 
 impl OrbitEvent {
@@ -319,6 +500,7 @@ impl OrbitEvent {
         currency: Option<String>,
         contract_type: Option<OrbitContractType>,
         expiration: Option<i64>,
+        strike: Option<Strike>,
         payload: Option<OrbitEventPayload>,
     ) -> Self {
         Self {
@@ -327,6 +509,7 @@ impl OrbitEvent {
             currency,
             contract_type,
             expiration,
+            strike,
             payload,
         }
     }
@@ -362,7 +545,7 @@ pub enum OrderbookUpdateType {
 
 #[derive(Clone, Debug)]
 pub enum OrbitCurrency {
-    Btc, 
-    Eth, 
-    Sol 
+    Btc,
+    Eth,
+    Sol,
 }

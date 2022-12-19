@@ -4,8 +4,8 @@ use std::{
 };
 
 use crate::{
-    OrbitContractType, OrbitEvent, OrbitEventPayload, OrbitExchange, OrbitInstrument,
-    OrderbookUpdate, OrderbookUpdateLevel, OrderbookUpdateType, OrbitCurrency,
+    OrbitContractType, OrbitCurrency, OrbitEvent, OrbitEventPayload, OrbitExchange,
+    OrbitInstrument, OrderbookUpdate, OrderbookUpdateLevel, OrderbookUpdateType,
 };
 use anyhow::Error;
 use chrono::{DateTime, NaiveDateTime, NaiveTime, Utc};
@@ -141,10 +141,19 @@ impl DeltaClient {
                                             let orbit_event: OrbitEvent = OrbitEvent {
                                                 exchange: OrbitExchange::Delta,
                                                 symbol: ob.symbol.clone(),
-                                                currency: symbol_details_map.get(&ob.symbol).map(|x| x.base.clone()),
-                                                contract_type: symbol_details_map.get(&ob.symbol).map(|x| x.contract_type.clone()),
+                                                currency: symbol_details_map
+                                                    .get(&ob.symbol)
+                                                    .map(|x| x.base.clone()),
+                                                contract_type: symbol_details_map
+                                                    .get(&ob.symbol)
+                                                    .map(|x| x.contract_type.clone()),
+                                                strike: symbol_details_map
+                                                    .get(&ob.symbol)
+                                                    .and_then(|x| x.strike),
                                                 payload: Some(norm_ob),
-                                                expiration: symbol_details_map.get(&ob.symbol).and_then(|x| x.expiration_date),
+                                                expiration: symbol_details_map
+                                                    .get(&ob.symbol)
+                                                    .and_then(|x| x.expiration_date),
                                             };
 
                                             let _ = sender
