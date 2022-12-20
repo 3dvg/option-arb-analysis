@@ -8,7 +8,6 @@ edition = "2021"
 [dependencies]
 anyhow = "1.0.66"
 chrono = "0.4.23"
-deribit = { version = "0.3.2", path = "../deribit-rs" }
 dotenv = "0.15.0"
 env_logger = "0.10.0"
 fehler = "1.0.0"

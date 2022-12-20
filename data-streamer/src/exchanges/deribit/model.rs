@@ -3,10 +3,12 @@ use std::{
     time::{Duration, Instant},
 };
 
-use anyhow::Error;
-use data_streamer::{
-    OrbitEvent, OrbitEventPayload, OrderbookUpdate, OrderbookUpdateLevel, OrderbookUpdateType,
+use crate::{
+    OrbitContractType, OrbitCurrency, OrbitEvent, OrbitEventPayload, OrbitExchange,
+    OrbitInstrument, OrderbookUpdate, OrderbookUpdateLevel, OrderbookUpdateType,
 };
+use anyhow::Error;
+use chrono::{DateTime, NaiveDateTime, NaiveTime, Utc};
 use futures::{SinkExt, StreamExt};
 use log::*;
 use serde::Deserialize;
@@ -15,10 +17,17 @@ use tokio::sync::broadcast::{self, Receiver, Sender};
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 use uuid::Uuid;
 
+#[derive(Debug)]
 pub struct DeribitClient {
     id: Uuid,
     sender: Sender<OrbitEvent>,
     receiver: Receiver<OrbitEvent>,
+}
+
+impl Default for DeribitClient {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl DeribitClient {
@@ -31,41 +40,63 @@ impl DeribitClient {
         }
     }
 
-    pub async fn get_instruments(&self) -> Result<DeribitInstrumentsWrapper, Error> {
-        let url = "https://deribit.com/api/v2/public/get_instruments?currency=BTC&expired=false"; //TODO!
+    pub async fn get_currencies(&self) -> Result<DeribitCurrencyWrapper, Error> {
+        let url = "https://test.deribit.com/api/v2/public/get_currencies";
         let response = reqwest::get(url).await?;
         let resp_text = response.text().await?;
-        let resp_json = serde_json::from_str::<DeribitInstrumentsWrapper>(&resp_text)
+        let resp_json = serde_json::from_str::<DeribitCurrencyWrapper>(&resp_text)
             .expect("Error parsing Deribit");
         Ok(resp_json)
+    }
+    // returns a vector because have to send a request per currency
+    pub async fn get_instruments(&self) -> Result<Vec<DeribitInstrumentsWrapper>, Error> {
+        let currencies = self.get_currencies().await?;
+        let mut result = Vec::with_capacity(currencies.result.capacity());
+        for c in currencies.result.iter() {
+            let url = format!(
+                "https://deribit.com/api/v2/public/get_instruments?currency={}&expired=false",
+                c.currency
+            );
+            let response = reqwest::get(url).await?;
+            let resp_text = response.text().await?;
+            let resp_json = serde_json::from_str::<DeribitInstrumentsWrapper>(&resp_text)
+                .expect("Error parsing Deribit");
+            result.push(resp_json);
+        }
+        Ok(result)
     }
 
     pub async fn consume(
         &self,
-        deribit_products: DeribitInstrumentsWrapper,
-    ) -> Result<Receiver<OrbitEvent>, Error> {
-        tokio::spawn(Self::_stream_websocket_deribit(
-            self.sender.clone(),
-            deribit_products,
-        ));
-        Ok(self.sender.subscribe())
+        sender: Sender<OrbitEvent>,
+        orbit_instruments: Vec<OrbitInstrument>,
+    ) -> Result<(), Error> {
+        tokio::spawn(Self::_stream_websocket_deribit(sender, orbit_instruments));
+        Ok(())
     }
 
     pub async fn _stream_websocket_deribit(
         sender: Sender<OrbitEvent>,
-        deribit_products: DeribitInstrumentsWrapper,
+        orbit_instruments: Vec<OrbitInstrument>,
     ) {
+        let mut deribit_symbols = vec![];
+        let mut symbol_details_map: HashMap<String, OrbitInstrument> = HashMap::new();
+        for x in orbit_instruments.iter() {
+            if x.contract_type == OrbitContractType::Future
+                || x.contract_type == OrbitContractType::PutOption
+                || x.contract_type == OrbitContractType::CallOption
+                || x.contract_type == OrbitContractType::PerpetualFuture
+                || x.contract_type == OrbitContractType::Spot
+            {
+                deribit_symbols.push(format!("book.{}.100ms", x.symbol)); //raw or 100ms
+                symbol_details_map.insert(x.symbol.clone(), x.clone());
+            }
+        }
+
         let mut sleep = 100; //ms
         loop {
-            let mut deribit_symbols = vec![];
-            for product in deribit_products.result.iter() {
-                if product.kind == "option" || product.kind == "future" {
-                    deribit_symbols.push(format!("book.{}.100ms", product.instrument_name));
-                    //raw or 100ms
-                }
-            }
             // debug!("{:#?}",deribit_symbols);
-            debug!("consuming deribit...");
+            debug!("consuming deribit");
             let (mut stream, _response) = connect_async("wss://www.deribit.com/ws/api/v2")
                 .await
                 .expect("Expected connection with Deribit to work");
@@ -107,25 +138,46 @@ impl DeribitClient {
             let mut hearbeat_timer: Instant = Instant::now();
             while let Some(event) = stream.next().await {
                 match event {
-                    Ok(msg) => match msg {
-                        Message::Text(text) => {
+                    Ok(msg) => {
+                        if let Message::Text(text) = msg {
                             let resp = serde_json::from_str::<HashMap<String, Value>>(&text)
                                 .expect("Error parsing Deribit");
-                            match resp.get("method") {
-                                Some(method) => match method {
-                                    Value::String(method) => match method.as_str() {
+                            if let Some(method) = resp.get("method") {
+                                if let Value::String(method) = method {
+                                    match method.as_str() {
                                         "subscription" => {
                                             let ob: DeribitOrderbookDataWrapper =
                                                 serde_json::from_str(&text).expect("Can't parse");
+
                                             let norm_ob: OrbitEventPayload =
                                                 OrbitEventPayload::OrderbookUpdate(
                                                     OrderbookUpdate::from(ob.params.data.clone()),
                                                 );
+
+                                            let contract_type = symbol_details_map
+                                                .get(&ob.params.data.instrument_name)
+                                                .map(|x| x.contract_type.clone());
+
+                                            let currency = symbol_details_map
+                                                .get(&ob.params.data.instrument_name)
+                                                .map(|x| x.base.clone());
+
+                                            let expiration = symbol_details_map
+                                                .get(&ob.params.data.instrument_name)
+                                                .and_then(|x| x.expiration_datetime);
+
+                                            let strike = symbol_details_map
+                                                .get(&ob.params.data.instrument_name)
+                                                .and_then(|x| x.strike);
+
                                             let orbit_event = OrbitEvent::new(
-                                                "deribit".to_string(),
+                                                OrbitExchange::Deribit,
                                                 ob.params.data.instrument_name,
-                                                "futures or options".to_string(),
-                                                norm_ob,
+                                                currency,
+                                                contract_type,
+                                                expiration,
+                                                strike,
+                                                Some(norm_ob),
                                             );
                                             // debug!("-- {:?}", ob);
                                             let _ = sender
@@ -150,17 +202,14 @@ impl DeribitClient {
                                                     .to_string(),
                                                 ))
                                                 .await;
-                                            debug!("sent heatbeat ping {:?}", result);
+                                            debug!("sent heatbeat ping");
                                         }
                                         _ => {}
-                                    },
-                                    _ => {}
-                                },
-                                None => {}
+                                    }
+                                }
                             }
                         }
-                        _ => {}
-                    },
+                    }
                     Err(error) => {
                         error!("Error: {}", error);
                         break;
@@ -175,6 +224,16 @@ impl DeribitClient {
     }
 }
 
+#[derive(Deserialize, Debug)]
+pub struct DeribitCurrencyWrapper {
+    result: Vec<DeribitCurrency>,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct DeribitCurrency {
+    currency: String,
+}
+
 #[derive(Clone, Debug)]
 pub enum DeribitMarketEvent {
     OrderbookSnapshot(DeribitOrderbook),
@@ -184,32 +243,57 @@ pub enum DeribitMarketEvent {
 pub struct DeribitInstrumentsWrapper {
     pub id: Option<u64>,
     // pub jsonrpc: String,
-    pub result: Vec<DeribitInstruments>,
+    pub result: Vec<DeribitInstrument>,
 }
 
 #[derive(Deserialize, Debug)]
-pub struct DeribitInstruments {
+pub struct DeribitInstrument {
     pub base_currency: String,
     // pub block_trade_commission: f64,
     // pub contract_size: u64,
     pub counter_currency: String,
     pub creation_timestamp: u64,
-    pub expiration_timestamp: u64,
+    pub expiration_timestamp: i64, //deribit for perps uses expiration year 3000
     pub future_type: Option<String>,
     pub instrument_id: u64,
     pub instrument_name: String,
     pub is_active: bool,
-    pub kind: String,
+    pub kind: DeribitInstrumentKind,
     // pub leverage: u64,
     // pub maker_commission: f64,
     // pub min_trade_amount: f64,
-    pub option_type: Option<String>,
+    pub option_type: Option<DeribitOptionType>,
     pub price_index: String,
-    pub quote_currency: String,
-    pub settlement_period: String,
+    pub quote_currency: String, //todo i think its actually counter currency in deribit api, implement USD/USDT for Orbit Currencies
+    pub settlement_period: DeribitSettlementPeriod,
     pub strike: Option<f64>,
     // pub taker_commision: f64,
     // pub tick_size: f64,
+}
+
+#[derive(Deserialize, Debug, Clone, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum DeribitSettlementPeriod {
+    Day,
+    Week,
+    Month,
+    Perpetual,
+}
+
+#[derive(Deserialize, Debug, Clone, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum DeribitInstrumentKind {
+    Future,
+    Option,
+    FutureCombo,
+    OptionCombo,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+#[serde(rename_all = "lowercase")]
+pub enum DeribitOptionType {
+    Put,
+    Call,
 }
 
 #[derive(Deserialize, Debug, Clone, Copy)]
@@ -274,13 +358,76 @@ impl From<DeribitOrderbook> for OrderbookUpdate {
             bids: deribit_orderbook
                 .bids
                 .iter()
-                .map(|der_ob| OrderbookUpdateLevel::from(der_ob))
+                .map(OrderbookUpdateLevel::from)
                 .collect(),
             asks: deribit_orderbook
                 .asks
                 .iter()
-                .map(|der_ob| OrderbookUpdateLevel::from(der_ob))
+                .map(OrderbookUpdateLevel::from)
                 .collect(),
+        }
+    }
+}
+
+impl From<&DeribitInstrument> for OrbitContractType {
+    fn from(deribit_product: &DeribitInstrument) -> Self {
+        match deribit_product.kind {
+            DeribitInstrumentKind::Future => match deribit_product.settlement_period {
+                DeribitSettlementPeriod::Perpetual => OrbitContractType::PerpetualFuture,
+                _ => OrbitContractType::Future,
+            },
+            DeribitInstrumentKind::Option => match deribit_product.option_type.clone() {
+                Some(option_type) => match option_type {
+                    DeribitOptionType::Call => OrbitContractType::CallOption,
+                    DeribitOptionType::Put => OrbitContractType::PutOption,
+                },
+                None => OrbitContractType::Unimplemented,
+            },
+            _ => OrbitContractType::Unimplemented,
+        }
+    }
+}
+
+impl From<&String> for OrbitCurrency {
+    fn from(deribit_instrument: &String) -> Self {
+        match deribit_instrument.to_lowercase().as_str() {
+            "btc" => OrbitCurrency::Btc,
+            "eth" => OrbitCurrency::Eth,
+            "sol" => OrbitCurrency::Sol,
+            _ => OrbitCurrency::Unimplemented,
+        }
+    }
+}
+
+impl From<&DeribitInstrument> for OrbitInstrument {
+    fn from(deribit_product: &DeribitInstrument) -> Self {
+        let contract_type = OrbitContractType::from(deribit_product);
+        let strike = deribit_product.strike.map(|strike| strike as u64);
+
+        let expiration_date = {
+            let d: DateTime<Utc> = DateTime::from_utc(
+                NaiveDateTime::from_timestamp_millis(deribit_product.expiration_timestamp).unwrap(),
+                Utc,
+            );
+            let nd = d.date_naive();
+            let t = NaiveTime::from_hms_opt(0, 0, 0).unwrap();
+            let a = NaiveDateTime::new(nd, t);
+            let d: DateTime<Utc> = DateTime::from_local(a, Utc);
+            // let d = d.timestamp_millis();
+            Some(d)
+        };
+
+        // debug!("deribit timestamp transformed {:?}, instrument {:?}", deribit_product.expiration_timestamp, deribit_product.instrument_name);
+        Self {
+            symbol: deribit_product.instrument_name.clone(),
+            base: OrbitCurrency::from(&deribit_product.base_currency),
+            quote: OrbitCurrency::from(&deribit_product.quote_currency),
+            strike,
+            expiration_datetime: Some(DateTime::from_utc(NaiveDateTime::from_timestamp_millis(deribit_product.expiration_timestamp).unwrap(), Utc)),
+            expiration_date,
+            contract_type,
+            exchange: OrbitExchange::Deribit,
+            //todo add native instrument name for websocket subs
         }
     }
 }

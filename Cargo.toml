@@ -3,5 +3,4 @@
 members = [
     "data-streamer",
     "option-arb-analyzer",
-    "deribit-rs",
 ]
